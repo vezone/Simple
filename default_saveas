@@ -1,0 +1,11 @@
+#include <iostream>
+
+//save as 1212
+
+int main()
+{    
+    std::cout << "It works!" << std::endl;
+    {
+    }
+    return 0;
+}    
