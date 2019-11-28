@@ -2,7 +2,8 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdint.h>
+
+#include "utils.h"
 
 //TODO:
 // * [check] работают ли new, open, save, save_as функции
@@ -19,22 +20,18 @@
 // * [maybe create] buttons for new, open, save, save_as
 // * [create] shortcuts for new, open, save, save_as
 // * [remove] all warnings
+// * [create] status bar
+// * [create] arrow  logic 
+// * [create] arrow + shift selection logic
+
+
+//opt
+// * [free] get_iter
+
+//textview -> sourceview
 
 #define WINDOW_WIDTH 1000
 #define WINDOW_HEIGHT 600
-
-typedef int32_t int32;
-typedef int64_t int64;
-
-struct FileInfo;
-
-typedef struct FileInfo {
-    char* filepath;
-    char* filename;
-    int tab_number;
-    struct FileInfo* next;
-} FileInfo;
-FileInfo* g_file_data = NULL;
 
 typedef struct simple_menu_bar 
 {
@@ -61,18 +58,14 @@ typedef struct simple_file
 
 typedef struct simple 
 {
-    GtkWidget* notebook;
     simple_menu_bar* menu_bar;
+    GtkWidget* notebook;
+    GtkWidget* statusbar;
     GtkWidget* vertical_box;
     GtkWidget* window;
 } simple;
 
 //func pointers
-char* file_read(const char* path);
-int32 vstring_length(const char* string);
-void file_write(const char* path, char* data);
-const char* file_get_name(filepath);
-
 static void window_destroy(GtkWindow* window, gpointer user_data);
 static simple* simple_new();
 static simple_menu_bar* simple_menu_bar_new();
@@ -84,188 +77,15 @@ static void notebook_callback(GtkNotebook* notebook, GtkWidget*page, guint page_
 static void notebook_tab_close_button_callback(GtkWidget* button, gpointer data);
 static GtkWidget* notebook_page_get_textview(GtkWidget* page);
 static GtkTextView* notebook_get_current_textview(GtkWidget* notebook);
-
-static FileInfo* 
-file_info_get(int page_number)
-{
-    FileInfo* ptr = g_file_data;
-    for (; ptr != NULL ;)
-    {
-        if (ptr->tab_number == page_number)
-        {
-            return ptr;
-        }
-        else
-        {
-            ptr = ptr->next;
-        }
-    }
-    return NULL;
-}
-
-static void
-file_info_add(int page_number, const char* filepath)
-{
-    g_print("in func\n");
-    if (g_file_data == NULL)
-    {
-        g_print("g_file_data == NULL\n");
-        g_file_data = malloc(sizeof(FileInfo));
-        g_file_data->filepath = filepath;
-        g_file_data->filename = file_get_name(filepath);
-        g_file_data->tab_number = page_number;
-        g_file_data->next = NULL;
-    }
-    else 
-    {
-        FileInfo* ptr = g_file_data;
-        while (ptr->next != NULL)
-        {
-            ptr = ptr->next;
-        }
-        ptr->next = malloc(sizeof(FileInfo));
-        ptr->next->filepath = filepath;
-        ptr->next->filename = file_get_name(filepath);
-        ptr->next->tab_number = page_number;
-        ptr->next->next = NULL;
-    }
-}
-
-//work in progress
-static void
-file_info_remove(int32 tab_number)
-{
-    if (g_file_data != NULL)
-    {
-        FileInfo* ptr = g_file_data;
-        while (ptr->next != NULL)
-        {
-            if (ptr->tab_number == tab_number)
-            {
-                FileInfo* temp = ptr->next;
-                if (ptr) { free(ptr); }
-                ptr = temp;
-            }
-            else if (ptr->next != NULL && ptr->next->tab_number == tab_number)
-            {
-
-            }
-            ptr = ptr->next;
-        }
-    }
-}
+static GtkTextIter* textview_get_cursor_iter(GtkTextView* textview);
+static void statusbar_set_info(GtkWidget* statusbar, GtkTextView* textview, GtkTextBuffer* textbuffer);
 
 simple* app;
 
 const char* g_main_directory_path = "/home/bies/Documents/programming/c/gtkTextEditor";
 const char* constant_for_editor = "    ";
+char buffer_insert_text[1];
 
-char* file_read(const char* path)
-{
-    long file_length;
-    char* file_content;
-    FILE* file;
-    file = fopen(path, "rb");
-    if (file != NULL)
-    {
-        fseek(file, 0, 2);
-        file_length = ftell(file);
-        fseek(file, 0, 0);
-        file_content = malloc((file_length + 1) * sizeof(char));
-        fread(file_content, sizeof(char), file_length, file);
-        file_content[file_length] = '\0';
-        fclose(file);
-        g_print("Read file successfully!\n");
-    }
-    else
-    {
-        file_content = 0;
-        g_print("Can't open a file!\n");
-    }
-    return file_content;
-}
-
-int32 vstring_length(const char* string)
-{
-    int32 length;
-    for (length = 0; string[length] != '\0'; length++);
-    return length;
-}
-
-int32 vstring_compare(const char* left, const char* right)
-{
-    int32 left_length = vstring_length(left);
-    int32 right_length = vstring_length(right);
-
-    if ((left_length == 0) || (right_length == 0))
-    {
-        return 0;
-    }
-    else if (left_length != right_length)
-    {
-        return 0;
-    }
-    else 
-    {
-        for (right_length = 0; right_length > left_length; right_length++)
-        {
-            if (left[right_length] != right[right_length])
-            {
-                return 0;
-            }
-        }
-    }
-
-    return 1;
-}
-
-void file_write(const char* path, char* data)
-{
-    g_print("call: file_write\n");
-    FILE* file;
-    file = fopen(path, "wb");
-    if (file != NULL)
-    {
-        if (data != NULL)
-        {
-            int32 data_length = vstring_length(data);
-            fwrite(data, sizeof(char), data_length, file);
-            g_print("Write to file successfully!\n");
-        }
-        fclose(file);
-    }
-    else
-    {
-        g_print("Can't open a file!\n");
-    }
-}
-
-const char* file_get_name(const char* filepath)
-{
-    int32 filepath_length = vstring_length(filepath);
-    int32 last_address = 0;
-
-    for (int32 i = 0; i < filepath_length; i++)
-    {
-        char el = filepath[i];
-
-        if (el == '/')
-        {
-            last_address = i + 1;
-        }
-    }
-
-    int32 new_length = filepath_length - last_address;
-    char* filename = malloc((new_length + 1) * sizeof(char));
-    for (int32 i = last_address; i < filepath_length; i++)
-    {
-        filename[i - last_address] = filepath[i];
-    }
-    filename[new_length] = '\0';
-    g_print("filename = %s\n", filename);
-
-    return filename;
-}
 
 static void
 window_destroy(GtkWindow* window, gpointer user_data)
@@ -288,10 +108,20 @@ simple_new()
     app->menu_bar = simple_menu_bar_new();
     app->notebook = simple_notebook_new();
 
-    app->vertical_box = gtk_box_new(TRUE, 10);
+    app->statusbar = gtk_statusbar_new();
+    guint context_id = gtk_statusbar_get_context_id(GTK_STATUSBAR(app->statusbar), "status");
+    const char* status_string = g_strdup_printf("line %d, column %d", 0, 0);
+    gtk_statusbar_push(GTK_STATUSBAR(app->statusbar), context_id, status_string);
+    gtk_widget_show(app->statusbar);
+
+    GtkWidget* hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_box_pack_start(GTK_BOX(hbox), app->statusbar, FALSE, FALSE, 0);
+
+    app->vertical_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_box_pack_start(GTK_BOX(app->vertical_box), app->menu_bar->menu, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(app->vertical_box), app->notebook, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(app->vertical_box), /*app->statusbar*/hbox, FALSE, FALSE, 0);
     gtk_widget_show(app->vertical_box);
-    gtk_box_pack_start(GTK_BOX(app->vertical_box), app->menu_bar->menu, FALSE, TRUE, 0);
-    gtk_box_pack_end(GTK_BOX(app->vertical_box), app->notebook, FALSE, TRUE, 0);
 
     gtk_container_add(GTK_CONTAINER(app->window), app->vertical_box);
 
@@ -384,9 +214,10 @@ simple_notebook_add_page(simple *app, const char* page_name)
     GtkWidget *scrolled_window;
     scrolled_window = gtk_scrolled_window_new(NULL, NULL);
     gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(scrolled_window), WINDOW_WIDTH);
-    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scrolled_window), WINDOW_HEIGHT);
+    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scrolled_window), WINDOW_HEIGHT-300);
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled_window), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
     gtk_container_add(GTK_CONTAINER(scrolled_window), text_view);
+    gtk_widget_show(scrolled_window);
 
     gtk_notebook_append_page(GTK_NOTEBOOK(app->notebook),
         scrolled_window, horizontal_bar);    
@@ -396,8 +227,27 @@ static gboolean
 on_text_view_pressed_event(GtkWidget* text_view, GdkEventKey* event, gpointer data)
 {
     //GTK_WIDGET_CLASS(text_view)->button_press_event(text_view, event);
+    GtkTextView* textview = NULL;
+    GtkTextBuffer* textbuffer = NULL;
+
     if (event->type == GDK_KEY_PRESS)
     {
+        //printting characters
+        switch (event->keyval)
+        {
+            case 33 ... 125:
+            {
+                if (!(event->state & GDK_CONTROL_MASK))
+                {
+                    buffer_insert_text[0] = event->keyval;
+                    GtkTextView* textview = notebook_get_current_textview(app->notebook);
+                    GtkTextBuffer* text_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
+                    gtk_text_buffer_insert_at_cursor(text_buffer, buffer_insert_text, 1);
+                }
+                break;
+            }
+        }
+
         switch (event->keyval)
         {
             case GDK_KEY_s:
@@ -405,12 +255,14 @@ on_text_view_pressed_event(GtkWidget* text_view, GdkEventKey* event, gpointer da
                 if (event->state & GDK_CONTROL_MASK)
                 {
                     g_print("Ctrl + S\n");
+                    //save logic;
                 }
                 break;
             }
 
-            case GDK_KEY_d:
-            case GDK_KEY_D: {
+            case GDK_KEY_d: 
+            case GDK_KEY_D: 
+            {
                 if (event->state & GDK_CONTROL_MASK)
                 {
                     //g_print("Ctrl + D\n");
@@ -422,19 +274,136 @@ on_text_view_pressed_event(GtkWidget* text_view, GdkEventKey* event, gpointer da
 
             case GDK_KEY_Return:
             {
-                //GtkTextBuffer* text_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(g_editor_text_view));
-                //gtk_text_buffer_insert_at_cursor(text_buffer, constant_for_editor, 4);
+                textview = notebook_get_current_textview(app->notebook);
+                textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
+                gtk_text_buffer_insert_at_cursor(textbuffer, "\n", 1);
+                break;
             }
 
-            case GDK_KEY_Tab: {
-                //GtkTextBuffer* text_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(g_editor_text_view));
-                //gtk_text_buffer_insert_at_cursor(text_buffer, constant_for_editor, 4);
+            //case GDK_KEY_KP_Space:
+            case GDK_KEY_space:
+            {
+                GtkTextView* textview = notebook_get_current_textview(app->notebook);
+                GtkTextBuffer* text_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
+                gtk_text_buffer_insert_at_cursor(text_buffer, " ", 1);
+                break;
+            }
+
+            case GDK_KEY_BackSpace:
+            {
+                //delete single character
+                GtkTextView* textview = notebook_get_current_textview(app->notebook);
+                GtkTextBuffer* textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
+                
+                GtkTextIter* iter = textview_get_cursor_iter(textview);
+                gtk_text_buffer_backspace(textbuffer, iter, FALSE, TRUE);
+
+                break;
+            }
+
+            case GDK_KEY_Delete:
+            {
+                //delete single character
+                GtkTextView* textview = notebook_get_current_textview(app->notebook);
+                GtkTextBuffer* textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
+                
+                GtkTextIter* iter = textview_get_cursor_iter(textview);
+                GtkTextIter* end = gtk_text_iter_copy(iter);
+                gtk_text_iter_forward_cursor_positions(end, 1);
+                gtk_text_buffer_delete(textbuffer, iter, end);
+                
+                gtk_text_iter_free(end);
+                break;
+            }
+
+            case GDK_KEY_Tab:
+            {
+                textview = notebook_get_current_textview(app->notebook);
+                textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
+                gtk_text_buffer_insert_at_cursor(textbuffer, constant_for_editor, 4);
+                break;
+            }
+
+            case GDK_KEY_Up:
+            {
+                g_print("up arrow\n");
+                textview = notebook_get_current_textview(app->notebook);
+                textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
+                
+                GtkTextIter* iter = textview_get_cursor_iter(textview);
+                gtk_text_iter_backward_line(iter);
+                gtk_text_buffer_place_cursor(textbuffer, iter);
+
+                break;
+            }
+
+            case GDK_KEY_Down:
+            {
+                g_print("down arrow\n");
+                GtkTextView* textview = notebook_get_current_textview(app->notebook);
+                GtkTextBuffer* textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
+                GtkTextIter* iter = textview_get_cursor_iter(textview);
+                gtk_text_iter_forward_line(iter);
+                gtk_text_buffer_place_cursor(textbuffer, iter);
+                
+                break;
+            }
+
+            case GDK_KEY_Left:
+            {
+                textview = notebook_get_current_textview(app->notebook);
+                textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
+                GtkTextIter* iter = textview_get_cursor_iter(textview);
+
+                if (event->state & GDK_KEY_Shift_L)
+                {
+                    gtk_text_iter_backward_word_start(iter);
+                }
+                else 
+                {
+                    gtk_text_iter_backward_cursor_positions(iter, 1);
+                }
+                gtk_text_buffer_place_cursor(textbuffer, iter);
+
+                break;
+            }
+
+            case GDK_KEY_Right:
+            {
+                textview = notebook_get_current_textview(app->notebook);
+                textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
+                GtkTextIter* iter = textview_get_cursor_iter(textview);
+                
+                if (event->state & GDK_KEY_Shift_L)
+                {
+                    gtk_text_iter_forward_word_end(iter);
+                }
+                else 
+                {
+                    gtk_text_iter_forward_cursor_positions(iter, 1);
+                }
+                gtk_text_buffer_place_cursor(textbuffer, iter);
+                
+                break;
+            }
+
+            default:{
+
                 break;
             }
         }
     }
 
-    return FALSE;
+
+    if (textview == NULL || textbuffer == NULL)
+    {
+        textview = notebook_get_current_textview(app->notebook);
+        textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
+    }
+    
+    statusbar_set_info(app->statusbar, textview, textbuffer);
+
+    return TRUE;
 }
 
 static void
@@ -442,7 +411,9 @@ menu_item_new_callback()
 {
     g_print("New clicked!\n");
     simple_notebook_add_page(app, "Untitled");
+    int pages_number = gtk_notebook_get_n_pages(GTK_NOTEBOOK(app->notebook))-1;
     gtk_widget_show_all(app->window);
+    gtk_notebook_set_current_page(GTK_NOTEBOOK(app->notebook), pages_number);
 }
 
 static void 
@@ -477,7 +448,7 @@ menu_item_open_callback()
         }
         g_print("filepath: %s\n", filepath);
             
-        const char* filename = file_get_name(filepath);
+        char* filename = file_get_name(filepath);
         simple_notebook_add_page(app, filename);
 
         char* editor_text = file_read(filepath);
@@ -490,11 +461,12 @@ menu_item_open_callback()
         GtkWidget* page = gtk_notebook_get_nth_page(
             GTK_NOTEBOOK(app->notebook), pages_number);
         GtkWidget* textview = notebook_page_get_textview(page);
+        gtk_notebook_set_current_page(GTK_NOTEBOOK(app->notebook), pages_number);
         if (textview != NULL)
         {
-            gtk_text_buffer_set_text(
-                gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview)),
-                editor_text, -1);   
+            GtkTextBuffer* textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
+            gtk_text_buffer_set_text(textbuffer, editor_text, -1);  
+            statusbar_set_info(app->statusbar, GTK_TEXT_VIEW(textview), textbuffer); 
         }
         else 
         {
@@ -629,7 +601,6 @@ notebook_page_get_textview(GtkWidget* page)
 {
     if (GTK_IS_CONTAINER(page))
     {
-        g_print("For some reason page is Container\n");
         GList*children = gtk_container_get_children(GTK_CONTAINER(page));
         for (GList* iter = children; iter != NULL; iter = iter->next)
         {
@@ -669,18 +640,48 @@ notebook_get_current_textview(GtkWidget* notebook)
     return textview;        
 }
 
+static GtkTextIter* 
+textview_get_cursor_iter(GtkTextView* textview)
+{
+    GtkTextBuffer* textbuffer;
+    GtkTextIter iter;
+    GtkTextMark* mark;
+
+    textbuffer = gtk_text_view_get_buffer(textview);
+    mark = gtk_text_buffer_get_insert(textbuffer);
+    gtk_text_buffer_get_iter_at_mark(textbuffer, &iter, mark);
+
+    return gtk_text_iter_copy(&iter);
+}
+
+static void
+statusbar_set_info(GtkWidget* statusbar, GtkTextView* textview, GtkTextBuffer* textbuffer)
+{
+    int row, col;
+    GtkTextIter iter;
+    GtkTextMark* mark;
+
+    mark = gtk_text_buffer_get_insert(textbuffer);
+    gtk_text_buffer_get_iter_at_mark(textbuffer, &iter, mark);
+    row = gtk_text_iter_get_line(&iter) + 1;
+    col = gtk_text_iter_get_line_offset(&iter) + 1;
+
+    guint context_id = gtk_statusbar_get_context_id(GTK_STATUSBAR(statusbar), "status");
+    const char* status_string = g_strdup_printf("line %d, column %d", row, col);
+    gtk_statusbar_push(GTK_STATUSBAR(statusbar), context_id, status_string);
+}
+
 int main(int argc, char** argv)
 {
     g_print("It works\n");
     gtk_init(&argc, &argv);
     
     app = simple_new();
-    //simple_notebook_add_page(app, "Untitled");
-    
-    //g_print("res = %d\n", res);
 
     gtk_widget_show_all(app->window);
 	gtk_main();
+
+    file_info_free();
 
     return 0;
 }
