@@ -3,21 +3,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-static FileInfo* g_file_data = NULL;
+static file_info* g_file_data = NULL;
 
-FileInfo* 
+file_info* 
 file_info_get(int page_number)
 {
-    FileInfo* ptr = g_file_data;
-    for (; ptr != NULL ;)
+    file_info* ptr = g_file_data;
+    for ( ; ptr != NULL; ptr = ptr->next)
     {
         if (ptr->tab_number == page_number)
         {
             return ptr;
-        }
-        else
-        {
-            ptr = ptr->next;
         }
     }
     return NULL;
@@ -28,49 +24,76 @@ file_info_add(int page_number, const char* filepath)
 {
     if (g_file_data == NULL)
     {
-        g_file_data = malloc(sizeof(FileInfo));
+        g_file_data = malloc(sizeof(file_info));
         g_file_data->filepath = vstring_copy(filepath);
         g_file_data->filename = vstring_copy(file_get_name(filepath));
         g_file_data->tab_number = page_number;
+        g_file_data->is_saved = 0;
         g_file_data->next = NULL;
     }
     else 
     {
-        FileInfo* ptr = g_file_data;
-        while (ptr->next != NULL)
-        {
-            ptr = ptr->next;
-        }
-        ptr->next = malloc(sizeof(FileInfo));
+        file_info* ptr;
+        for (ptr = g_file_data; ptr->next != NULL; ptr = ptr->next);
+        ptr->next = malloc(sizeof(file_info));
         ptr->next->filepath = vstring_copy(filepath);
         ptr->next->filename = vstring_copy(file_get_name(filepath));
         ptr->next->tab_number = page_number;
+        g_file_data->is_saved = 0;
         ptr->next->next = NULL;
     }
 }
 
-//work in progress
+//TODO: rework
 void
 file_info_remove(int32 tab_number)
 {
     if (g_file_data != NULL)
     {
-        FileInfo* ptr = g_file_data;
-        while (ptr->next != NULL)
+        file_info* ptr = g_file_data;
+        file_info* temp_prev = NULL;
+        file_info* temp_next;
+        for ( ; ptr != NULL; ptr = ptr->next)
         {
             if (ptr->tab_number == tab_number)
             {
-                FileInfo* temp = ptr->next;
-                if (ptr) { free(ptr); }
-                ptr = temp;
+                if (ptr->filename) { free(ptr->filename); }
+                if (ptr->filepath) { free(ptr->filepath); } 
+                if (temp_prev != NULL) { temp_prev->next = ptr->next; }
+                else { g_file_data = ptr->next; }
+                return;
             }
-            else if (ptr->next != NULL && ptr->next->tab_number == tab_number)
-            {
-
-            }
-            ptr = ptr->next;
+            temp_prev = ptr;
         }
     }
+}
+
+void 
+file_info_set_saved(int32 tab_number)
+{
+    file_info* ptr;
+    for (ptr = g_file_data; ptr != NULL; ptr = ptr->next)
+    {
+        if (ptr->tab_number == tab_number)
+        {
+            ptr->is_saved = 1;
+            return;
+        }
+    }
+}
+
+int32 file_info_is_saved(int32 tab_number)
+{
+    file_info* ptr;
+    for (ptr = g_file_data; ptr != NULL; ptr = ptr->next)
+    {
+        if (ptr->tab_number == tab_number)
+        {
+            printf("ptr is saved: %d \n", ptr->is_saved);
+            return ptr->is_saved;
+        }
+    }
+    return 0;
 }
 
 // wip 
@@ -78,19 +101,33 @@ file_info_remove(int32 tab_number)
 void 
 file_info_free()
 {
-    FileInfo* ptr = g_file_data;
+    file_info* ptr = g_file_data;
     if (ptr != NULL)
     {
         while (ptr->next != NULL)
         {
-            if (ptr->filepath) { free(ptr->filepath); printf("file path: %s\n", ptr->filepath); }
-            if (ptr->filename) { free(ptr->filename); printf("file path: %s\n", ptr->filename); }
+            if (ptr->filepath) { /* printf("file path: %s\n", ptr->filepath); */ free(ptr->filepath); }
+            if (ptr->filename) { /* printf("file path: %s\n", ptr->filename); */ free(ptr->filename); }
             ptr = ptr->next;
         }
     }
     else
     {
         printf("file info is empty!\n");
+    }
+}
+
+void file_info_print()
+{   
+    file_info* ptr = g_file_data;
+    printf("PRINT\n");
+    if (ptr != NULL)
+    {
+        for ( ; ptr != NULL; ptr = ptr->next)
+        {
+            printf("number: %d, file name: %s, file path: %s\n", 
+                ptr->tab_number, ptr->filename, ptr->filepath);
+        }
     }
 }
 
@@ -182,8 +219,11 @@ char* file_get_name(const char* filepath)
 {
     int32 filepath_length = vstring_length(filepath);
     int32 last_address = 0;
+    int32 new_length;
+    int32 i = 0;
+    char* filename;
 
-    for (int32 i = 0; i < filepath_length; i++)
+    for ( ; i < filepath_length; i++)
     {
         char el = filepath[i];
 
@@ -193,9 +233,9 @@ char* file_get_name(const char* filepath)
         }
     }
 
-    int32 new_length = filepath_length - last_address;
-    char* filename = malloc((new_length + 1) * sizeof(char));
-    for (int32 i = last_address; i < filepath_length; i++)
+    new_length = filepath_length - last_address;
+    filename = malloc((new_length + 1) * sizeof(char));
+    for (i = last_address; i < filepath_length; i++)
     {
         filename[i - last_address] = filepath[i];
     }

@@ -6,30 +6,29 @@
 #include "utils.h"
 
 //TODO:
-// * [check] работают ли new, open, save, save_as функции
-// * [write] remove func for FileInfo
-// * [rename] FileInfo to file_info
+
+// * [new-module] editor->setting
+// *    [create] flexible tab (tab=4, tab=8)
+// *    [create] color theme (cairo, gdk)
+
+// * [new-module] autocomplete
+// *    [create] label in hz_bar for file with changes
+
 // * [write] func for hz_bar_close_btn
 // * [write] save_as logic for "Untitled.c"
-// * [create] flexible tab (tab=4, tab=8)
-// * [create] editor->setting
-// * [create] color theme (cairo, gdk)
-// * [create] autocomplete
-// * [create] status bar
-// * [create] label in hz_bar for file with changes
-// * [maybe create] buttons for new, open, save, save_as
-// * [create] shortcuts for new, open, save, save_as
-// * [remove] all warnings
-// * [create] status bar
-// * [create] arrow  logic 
-// * [create] arrow + shift selection logic
-
+// * [maybe-create] shortcuts for new, open, save, save_as
+// * [fix-it] status bar not work with mouse very good
+// * [work on] up & down arrows
+// * [create] selection && arrow + shift selection logic
 
 //opt
 // * [free] get_iter
 
 //textview -> sourceview
 
+#define SIMPLE_MOUSE_RIGHT_BUTTON 3
+#define SIMPLE_MOUSE_MIDDLE_BUTTON 2 
+#define SIMPLE_MOUSE_LEFT_BUTTON 1
 #define WINDOW_WIDTH 1000
 #define WINDOW_HEIGHT 600
 
@@ -66,26 +65,42 @@ typedef struct simple
 } simple;
 
 //func pointers
-static void window_destroy(GtkWindow* window, gpointer user_data);
+//simple api
 static simple* simple_new();
+static gboolean simple_window_key_press_callback(GtkWidget* window, GdkEventKey* key, gpointer data);
 static simple_menu_bar* simple_menu_bar_new();
 static GtkWidget* simple_notebook_new();
 static void simple_notebook_add_page(simple *app, const char* page_name);
-static gboolean on_text_view_pressed_event(GtkWidget* text_view, GdkEventKey* event, gpointer data);
+
+//text view
+static gboolean text_view_key_press_callback(GtkWidget* text_view, GdkEventKey* event, gpointer data);
+static gboolean text_view_mouse_press_callback(GtkWidget* widget, GdkEventButton* event, gpointer data);
+//menu bar
 static void menu_bar_callback(GtkWidget* widget, gpointer data);
+static void menu_item_new_callback();
+static void menu_item_open_callback();
+static void menu_item_save_callback();
+static void menu_item_save_as_callback();
+static void menu_item_editor_callback(simple *app);
+//notebook
 static void notebook_callback(GtkNotebook* notebook, GtkWidget*page, guint page_num, gpointer data);
 static void notebook_tab_close_button_callback(GtkWidget* button, gpointer data);
 static GtkWidget* notebook_page_get_textview(GtkWidget* page);
 static GtkTextView* notebook_get_current_textview(GtkWidget* notebook);
+//additional
+static void window_destroy(GtkWindow* window, gpointer user_data);
 static GtkTextIter* textview_get_cursor_iter(GtkTextView* textview);
 static void statusbar_set_info(GtkWidget* statusbar, GtkTextView* textview, GtkTextBuffer* textbuffer);
 
 simple* app;
 
 const char* g_main_directory_path = "/home/bies/Documents/programming/c/gtkTextEditor";
-const char* constant_for_editor = "    ";
-char buffer_insert_text[1];
+#define TabSpace2 "  "
+#define TabSpace4 TabSpace2 TabSpace2
+#define TabSpace8 TabSpace4 TabSpace4
 
+const char* constant_for_editor = TabSpace4;
+char buffer_insert_text[1];
 
 static void
 window_destroy(GtkWindow* window, gpointer user_data)
@@ -104,6 +119,7 @@ simple_new()
     gtk_window_set_default_size(GTK_WINDOW(app->window), WINDOW_WIDTH, WINDOW_HEIGHT);
     gtk_window_set_gravity(GTK_WINDOW(app->window), GDK_GRAVITY_CENTER);
     g_signal_connect(app->window, "destroy", G_CALLBACK(window_destroy), NULL);
+    g_signal_connect(app->window, "key-press-event", G_CALLBACK(simple_window_key_press_callback), NULL);
     
     app->menu_bar = simple_menu_bar_new();
     app->notebook = simple_notebook_new();
@@ -126,6 +142,37 @@ simple_new()
     gtk_container_add(GTK_CONTAINER(app->window), app->vertical_box);
 
     return app;
+}
+
+static gboolean 
+simple_window_key_press_callback(GtkWidget* window, GdkEventKey* key, gpointer data)
+{
+    if (key->type == GDK_KEY_PRESS)
+    {
+        switch (key->keyval)
+        {
+            case GDK_KEY_o:
+            case GDK_KEY_O:
+            {
+                g_print("Ctrl + O\n");
+                menu_item_open_callback();
+                break;
+            }
+
+            case GDK_KEY_n:
+            case GDK_KEY_N:
+            {
+                g_print("Ctrl + N\n");
+                menu_item_new_callback();
+                break;
+            }
+
+            default:{
+                break;
+            }
+        }
+    }
+    return FALSE;
 }
 
 static simple_menu_bar*
@@ -181,14 +228,13 @@ simple_notebook_new()
 static void
 simple_notebook_add_page(simple *app, const char* page_name)
 {
-    int* page_number = malloc(sizeof(int));
     GtkWidget *horizontal_bar, *tab_close_button, *tab_label;
+    GtkWidget *text_view;
+    GtkWidget *scrolled_window;
     
     horizontal_bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     tab_close_button = gtk_button_new_with_label("Close");
-    *page_number = gtk_notebook_get_n_pages(GTK_NOTEBOOK(app->notebook));
-    g_signal_connect(tab_close_button, "clicked", 
-        G_CALLBACK(notebook_tab_close_button_callback), (void*)page_number);
+    
     tab_label = gtk_label_new(page_name);
     gtk_widget_show(GTK_WIDGET(tab_close_button));
     gtk_widget_show(GTK_WIDGET(tab_label));
@@ -196,7 +242,6 @@ simple_notebook_add_page(simple *app, const char* page_name)
     gtk_box_pack_start(GTK_BOX(horizontal_bar), tab_label, TRUE, TRUE, 0);
     gtk_box_pack_end(GTK_BOX(horizontal_bar), tab_close_button, FALSE, FALSE, 0);
 
-    GtkWidget* text_view;
     text_view = gtk_text_view_new();
     gtk_text_view_set_editable(GTK_TEXT_VIEW(text_view), TRUE);
     gtk_text_view_set_left_margin(GTK_TEXT_VIEW(text_view), 10);
@@ -206,12 +251,13 @@ simple_notebook_add_page(simple *app, const char* page_name)
     gtk_text_view_set_monospace(GTK_TEXT_VIEW(text_view), TRUE);
     gtk_text_view_set_accepts_tab(GTK_TEXT_VIEW(text_view), TRUE);
     g_signal_connect(GTK_TEXT_VIEW(text_view), "key-press-event",
-        G_CALLBACK(on_text_view_pressed_event), NULL);
+        G_CALLBACK(text_view_key_press_callback), NULL);
+    g_signal_connect(GTK_TEXT_VIEW(text_view), "button-press-event",
+        G_CALLBACK(text_view_mouse_press_callback), NULL);
     gtk_text_buffer_set_text(
         gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view)),
         "", -1);   
 
-    GtkWidget *scrolled_window;
     scrolled_window = gtk_scrolled_window_new(NULL, NULL);
     gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(scrolled_window), WINDOW_WIDTH);
     gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scrolled_window), WINDOW_HEIGHT-300);
@@ -219,12 +265,17 @@ simple_notebook_add_page(simple *app, const char* page_name)
     gtk_container_add(GTK_CONTAINER(scrolled_window), text_view);
     gtk_widget_show(scrolled_window);
 
+    g_signal_connect(tab_close_button, "clicked", 
+        G_CALLBACK(notebook_tab_close_button_callback), (void*)scrolled_window);
+
     gtk_notebook_append_page(GTK_NOTEBOOK(app->notebook),
         scrolled_window, horizontal_bar);    
+    gtk_notebook_set_tab_reorderable(GTK_NOTEBOOK(app->notebook),
+        scrolled_window, TRUE);
 }
 
 static gboolean
-on_text_view_pressed_event(GtkWidget* text_view, GdkEventKey* event, gpointer data)
+text_view_key_press_callback(GtkWidget* text_view, GdkEventKey* event, gpointer data)
 {
     //GTK_WIDGET_CLASS(text_view)->button_press_event(text_view, event);
     GtkTextView* textview = NULL;
@@ -247,15 +298,25 @@ on_text_view_pressed_event(GtkWidget* text_view, GdkEventKey* event, gpointer da
                 break;
             }
         }
-
         switch (event->keyval)
         {
             case GDK_KEY_s:
-            case GDK_KEY_S: {
+            case GDK_KEY_S: 
+            {
                 if (event->state & GDK_CONTROL_MASK)
                 {
                     g_print("Ctrl + S\n");
-                    //save logic;
+                    int page_number = 
+                        gtk_notebook_get_current_page(GTK_NOTEBOOK(app->notebook));
+                    
+                    if (file_info_is_saved(page_number) == 1)
+                    {
+                        menu_item_save_callback();
+                    }
+                    else
+                    {
+                        menu_item_save_as_callback();
+                    }
                 }
                 break;
             }
@@ -387,6 +448,16 @@ on_text_view_pressed_event(GtkWidget* text_view, GdkEventKey* event, gpointer da
                 break;
             }
 
+            //case SIMPLE_MOUSE_LEFT_BUTTON:
+            //{
+            //    g_print("left btn clicked!\n");
+            //    GtkTextView* textview = notebook_get_current_textview(app->notebook);
+            //    statusbar_set_info(app->statusbar, 
+            //        textview, 
+            //        gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview)));
+            //    break;
+            //}
+
             default:{
 
                 break;
@@ -394,16 +465,42 @@ on_text_view_pressed_event(GtkWidget* text_view, GdkEventKey* event, gpointer da
         }
     }
 
-
-    if (textview == NULL || textbuffer == NULL)
+    if (textview == NULL)
     {
         textview = notebook_get_current_textview(app->notebook);
+    }
+
+    if (textbuffer == NULL)
+    {
         textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
     }
-    
-    statusbar_set_info(app->statusbar, textview, textbuffer);
+
+    statusbar_set_info(app->statusbar, 
+        textview, textbuffer);
 
     return TRUE;
+}
+
+//need to return true and write all logic myself
+static gboolean
+text_view_mouse_press_callback(GtkWidget* widget, GdkEventButton* event, gpointer data)
+{
+    if (event->type == GDK_BUTTON_PRESS)
+    {
+        if (event->button == SIMPLE_MOUSE_RIGHT_BUTTON)
+        {
+            g_print("right btn clicked!\n");
+        }
+        else if (event->button == SIMPLE_MOUSE_LEFT_BUTTON)
+        {
+            g_print("left btn clicked!\n");
+            GtkTextView* textview = notebook_get_current_textview(app->notebook);
+            statusbar_set_info(app->statusbar, 
+                textview, 
+                gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview)));
+        }
+    }
+    return FALSE;
 }
 
 static void
@@ -412,8 +509,8 @@ menu_item_new_callback()
     g_print("New clicked!\n");
     simple_notebook_add_page(app, "Untitled");
     int pages_number = gtk_notebook_get_n_pages(GTK_NOTEBOOK(app->notebook))-1;
-    gtk_widget_show_all(app->window);
     gtk_notebook_set_current_page(GTK_NOTEBOOK(app->notebook), pages_number);
+    gtk_widget_show_all(app->window);
 }
 
 static void 
@@ -441,11 +538,11 @@ menu_item_open_callback()
         
         const char* filepath = 
         gtk_file_chooser_get_filename(chooser);
-        if (filepath == NULL)
-        {
-            //TODO: remove this in future
-            filepath = "/home/bies/Documents/programming/c/gtkTextEditor/default.c";    
-        }
+        //if (filepath == NULL)
+        //{
+        //    //TODO: remove this in future
+        //    filepath = "/home/bies/Documents/programming/c/gtkTextEditor/default.c";    
+        //}
         g_print("filepath: %s\n", filepath);
             
         char* filename = file_get_name(filepath);
@@ -457,9 +554,10 @@ menu_item_open_callback()
         int pages_number = gtk_notebook_get_n_pages(GTK_NOTEBOOK(app->notebook))-1;
         g_print("gtk_notebook_get_n_pages: %d\n", pages_number);
         
-        file_info_add(pages_number, filepath);
         GtkWidget* page = gtk_notebook_get_nth_page(
             GTK_NOTEBOOK(app->notebook), pages_number);
+        file_info_add(pages_number, filepath);
+
         GtkWidget* textview = notebook_page_get_textview(page);
         gtk_notebook_set_current_page(GTK_NOTEBOOK(app->notebook), pages_number);
         if (textview != NULL)
@@ -491,7 +589,7 @@ menu_item_save_callback()
     int32 page_number = gtk_notebook_get_current_page(GTK_NOTEBOOK(app->notebook));
     if (page_number != -1)
     {
-        FileInfo* file_info = file_info_get(page_number);
+        file_info* file_info = file_info_get(page_number);
         GtkWidget* page = gtk_notebook_get_nth_page(
                     GTK_NOTEBOOK(app->notebook), page_number);
         GtkTextView* textview = notebook_get_current_textview(app->notebook);
@@ -505,6 +603,7 @@ menu_item_save_callback()
                 text = gtk_text_buffer_get_text(textbuffer, &start, &end, FALSE);
                 g_print("text: %s\n", text);
                 file_write(file_info->filepath, text);
+                file_info_set_saved(page_number);
             }
         }
     }
@@ -527,31 +626,90 @@ menu_item_save_as_callback()
     if (result == GTK_RESPONSE_ACCEPT)
     {
         char* text;
-        char* filename;
+        char* filepath;
         GtkFileChooser* chooser;
         GtkTextView* textview;
         GtkTextBuffer* buffer;
         GtkTextIter start;
         GtkTextIter end;
-    
+        int32 page_number;
+
         chooser = GTK_FILE_CHOOSER(file_chooser_save);
-        filename = gtk_file_chooser_get_filename(chooser);
+        filepath = gtk_file_chooser_get_filename(chooser);
         textview = notebook_get_current_textview(app->notebook);
         buffer = gtk_text_view_get_buffer(textview);
         
-        if (filename == NULL)
-        {
-            filename = "/home/bies/Documents/programming/c/gtkTextEditor/default.c";    
-        }
+        //if (filepath == NULL)
+        //{
+        //    filepath = "/home/bies/Documents/programming/c/gtkTextEditor/default.c";    
+        //}
         
         gtk_text_buffer_get_bounds(buffer, &start, &end);
         text = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
     
         g_print("text: %s\n", text);
-        file_write(filename, text);
-        g_free(filename);
+        file_write(filepath, text);
+        page_number = 
+            gtk_notebook_get_current_page(GTK_NOTEBOOK(app->notebook));
+        GtkWidget* current_page = 
+            gtk_notebook_get_nth_page(GTK_NOTEBOOK(app->notebook), page_number);
+        GtkWidget* horizontal_bar = 
+            gtk_notebook_get_tab_label(GTK_NOTEBOOK(app->notebook), current_page);
+        
+        if (GTK_IS_CONTAINER(horizontal_bar))
+        {
+            GList* children = gtk_container_get_children(GTK_CONTAINER(horizontal_bar));
+            for (GList* iter = children; iter != NULL; iter = iter->next)
+            {
+                gpointer data = iter->data;
+                GtkWidget* child = GTK_WIDGET(data);
+                const char* child_name = gtk_widget_get_name(child);
+                if (vstring_compare(child_name, "GtkLabel"))
+                {
+                    gtk_label_set_text(GTK_LABEL(child), 
+                        file_get_name(filepath));
+                }
+            }
+        }
+
+        file_info_add(page_number, filepath);
+        file_info_set_saved(page_number);
+        
+        if (filepath) { g_free(filepath); }
     }
     gtk_widget_destroy(file_chooser_save);
+}
+
+static void 
+menu_item_editor_callback(simple *app)
+{
+    int* page_number = malloc(sizeof(int));
+    GtkWidget *horizontal_bar, *tab_close_button, *tab_label;
+
+    horizontal_bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    tab_close_button = gtk_button_new_with_label("Close");
+    tab_label = gtk_label_new("Settings");
+    gtk_box_pack_start(GTK_BOX(horizontal_bar), tab_label, TRUE, TRUE, 0);
+    gtk_box_pack_end(GTK_BOX(horizontal_bar), tab_close_button, FALSE, FALSE, 0);
+    gtk_widget_show(GTK_WIDGET(tab_close_button));
+    gtk_widget_show(GTK_WIDGET(tab_label));
+    gtk_widget_show(GTK_WIDGET(horizontal_bar));
+ 
+    GtkWidget *scrolled_window;
+    scrolled_window = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(scrolled_window), WINDOW_WIDTH);
+    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scrolled_window), WINDOW_HEIGHT-300);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled_window), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+    //gtk_container_add(GTK_CONTAINER(scrolled_window), content);
+    gtk_widget_show(scrolled_window);
+
+    g_signal_connect(tab_close_button, "clicked", 
+        G_CALLBACK(notebook_tab_close_button_callback), (void*)scrolled_window);
+
+    gtk_notebook_append_page(GTK_NOTEBOOK(app->notebook),
+        scrolled_window, horizontal_bar);
+    gtk_notebook_set_tab_reorderable(GTK_NOTEBOOK(app->notebook),
+        scrolled_window, TRUE);
 }
 
 static void
@@ -576,7 +734,7 @@ menu_bar_callback(GtkWidget* widget, gpointer data)
     }
     else if ((int64_t)widget == (int64_t)app->menu_bar->menu_item_settings)
     {
-        g_print("Editor -> Settings\n");
+        menu_item_editor_callback(app);
     }
 }
 
@@ -590,10 +748,22 @@ notebook_callback(GtkNotebook* notebook, GtkWidget*page, guint page_num, gpointe
 static void 
 notebook_tab_close_button_callback(GtkWidget* button, gpointer data)
 {
-    int* notebook_page_number = 
-        //gtk_notebook_get_current_page(GTK_NOTEBOOK(g_notebook_editor));
-        ((int*)data);
-    g_print("page num: %d\n", *notebook_page_number);
+    GtkWidget* page = (GtkWidget*) data;
+    int notebook_page_number = 
+        gtk_notebook_page_num(GTK_NOTEBOOK(app->notebook), page);
+    
+    file_info_remove(notebook_page_number);
+    file_info* ptr = file_info_get(notebook_page_number);
+    while (ptr != NULL)
+    {
+        --ptr->tab_number;
+        ptr = ptr->next;   
+        g_print("ptr->tab_number: %d\n", ptr->tab_number); 
+    }
+
+    gtk_notebook_remove_page(GTK_NOTEBOOK(app->notebook), notebook_page_number);
+
+    g_print("page num: %d\n", notebook_page_number);
 }
 
 static GtkWidget* 
@@ -613,7 +783,6 @@ notebook_page_get_textview(GtkWidget* page)
             }
             g_print("child_name: %s\n", child_name);
         }
-
     }
     else if (GTK_IS_BIN(page))
     {
@@ -673,6 +842,8 @@ statusbar_set_info(GtkWidget* statusbar, GtkTextView* textview, GtkTextBuffer* t
 
 int main(int argc, char** argv)
 {
+    #if 1
+    
     g_print("It works\n");
     gtk_init(&argc, &argv);
     
@@ -682,6 +853,29 @@ int main(int argc, char** argv)
 	gtk_main();
 
     file_info_free();
+    
+    #else
+
+    file_info_add(0, "root/First");
+    file_info_add(1, "root/Second");
+    file_info_add(2, "root/Third");
+    file_info_add(3, "root/Some");
+    file_info_add(4, "root/Any");
+    file_info_add(5, "root/Blabla");
+
+    file_info_print();
+    file_info_remove(0);
+    file_info_remove(1);
+    file_info_remove(2);
+    file_info_remove(3);
+    file_info_remove(4);
+    file_info_remove(5);
+    file_info_print();
+
+    file_info_free();
+
+    #endif
+
 
     return 0;
 }
