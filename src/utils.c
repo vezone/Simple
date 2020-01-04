@@ -131,29 +131,6 @@ void file_info_print()
     }
 }
 
-char* file_read(const char* path)
-{
-    long file_length;
-    char* file_content;
-    FILE* file;
-    file = fopen(path, "rb");
-    if (file != NULL)
-    {
-        fseek(file, 0, 2);
-        file_length = ftell(file);
-        fseek(file, 0, 0);
-        file_content = malloc((file_length + 1) * sizeof(char));
-        fread(file_content, sizeof(char), file_length, file);
-        file_content[file_length] = '\0';
-        fclose(file);
-    }
-    else
-    {
-        file_content = 0;
-    }
-    return file_content;
-}
-
 int32 vstring_length(const char* string)
 {
     int32 length;
@@ -200,7 +177,30 @@ char* vstring_copy(const char* to_copy)
     return copy;
 }
 
-void file_write(const char* path, char* data)
+const char* file_read(const char* path)
+{
+    long file_length;
+    char* file_content;
+    FILE* file;
+    file = fopen(path, "rb");
+    if (file != NULL)
+    {
+        fseek(file, 0, 2);
+        file_length = ftell(file);
+        fseek(file, 0, 0);
+        file_content = malloc((file_length + 1) * sizeof(char));
+        fread(file_content, sizeof(char), file_length, file);
+        file_content[file_length] = '\0';
+        fclose(file);
+    }
+    else
+    {
+        file_content = 0;
+    }
+    return (const char*)file_content;
+}
+
+void file_write(const char* path, const char* data)
 {
     FILE* file;
     file = fopen(path, "wb");

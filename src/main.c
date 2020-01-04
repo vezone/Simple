@@ -14,17 +14,43 @@
 // * [new-module] autocomplete
 // *    [create] label in hz_bar for file with changes
 
-// * [write] func for hz_bar_close_btn
-// * [write] save_as logic for "Untitled.c"
 // * [maybe-create] shortcuts for new, open, save, save_as
 // * [fix-it] status bar not work with mouse very good
 // * [work on] up & down arrows
 // * [create] selection && arrow + shift selection logic
+// * editor page - single
+
+// * [create] enter + {} logic
+// * [mod] deleting pair character ( '', "", (), {} )
+// * [create] logic for "in_brackets" 
+// * [fix] {}
+// * [fix] ctrl+o & ctrl+s & save_as logic
+
+// уровень вложенности для { }
 
 //opt
 // * [free] get_iter
 
-//textview -> sourceview
+/*
+NOTE:
+    * Для данной функции нужно передавать line - 1, col - 1
+    gtk_text_buffer_get_iter_at_line_offset(buf, &iter, line-1, col-1)
+*/
+
+#define IS_LOG_ACTIVE 0
+#define IS_DEBUG_ACTIVE 1
+
+#if IS_LOG_ACTIVE == 1
+    #define log(...) g_print(__VA_ARGS__)
+#else
+    #define log(...) 
+#endif
+
+#if IS_DEBUG_ACTIVE == 1
+    #define debug(...) g_print(__VA_ARGS__)
+#else
+    #define debug(...) 
+#endif
 
 #define SIMPLE_MOUSE_RIGHT_BUTTON 3
 #define SIMPLE_MOUSE_MIDDLE_BUTTON 2 
@@ -55,8 +81,15 @@ typedef struct simple_file
     int tab_number;
 } simple_file;
 
+typedef struct editor_typing_settings 
+{
+    int left_bracket;
+    int in_brackets;
+} editor_typing_settings; 
+
 typedef struct simple 
 {
+    editor_typing_settings editor_typing_setting;
     simple_menu_bar* menu_bar;
     GtkWidget* notebook;
     GtkWidget* statusbar;
@@ -90,7 +123,9 @@ static GtkTextView* notebook_get_current_textview(GtkWidget* notebook);
 //additional
 static void window_destroy(GtkWindow* window, gpointer user_data);
 static GtkTextIter* textview_get_cursor_iter(GtkTextView* textview);
+static const char* text_buffer_get_text(GtkTextBuffer* textbuffer);
 static void statusbar_set_info(GtkWidget* statusbar, GtkTextView* textview, GtkTextBuffer* textbuffer);
+static void syntax_highlight();
 
 simple* app;
 
@@ -98,14 +133,34 @@ const char* g_main_directory_path = "/home/bies/Documents/programming/c/gtkTextE
 #define TabSpace2 "  "
 #define TabSpace4 TabSpace2 TabSpace2
 #define TabSpace8 TabSpace4 TabSpace4
+#define EnterOffset "\n"TabSpace4"\n"
 
 const char* constant_for_editor = TabSpace4;
 char buffer_insert_text[1];
+char buffer_insert_text_2[2];
+
+const char* key_word = "class";
+
+const char* key_words_struct[] = {
+    "class", "struct"
+};
+
+const char* key_words_types[] = {
+    "const", "void",
+    "char",
+    "int", "int8", "int16", "int32", "int64",
+    "float", "double"
+};
+GtkTextTag* key_words_types_tag;
+
+const char* key_words_cycle[] = {
+    "for", "while", "do"
+};
 
 static void
 window_destroy(GtkWindow* window, gpointer user_data)
 {
-    g_print("Destroying window !\n");
+    log("Destroying window !\n");
     gtk_main_quit();
 }
 
@@ -154,18 +209,26 @@ simple_window_key_press_callback(GtkWidget* window, GdkEventKey* key, gpointer d
             case GDK_KEY_o:
             case GDK_KEY_O:
             {
-                g_print("Ctrl + O\n");
-                menu_item_open_callback();
+                if (key->state & GDK_CONTROL_MASK)
+                {
+                    log("Ctrl + O\n");
+                    menu_item_open_callback();
+                }
                 break;
             }
 
             case GDK_KEY_n:
             case GDK_KEY_N:
             {
-                g_print("Ctrl + N\n");
-                menu_item_new_callback();
+                if (key->state & GDK_CONTROL_MASK)
+                {
+                    log("Ctrl + N\n");
+                    menu_item_new_callback();
+                }
                 break;
             }
+
+            
 
             default:{
                 break;
@@ -286,7 +349,15 @@ text_view_key_press_callback(GtkWidget* text_view, GdkEventKey* event, gpointer 
         //printting characters
         switch (event->keyval)
         {
-            case 33 ... 125:
+            case 32 ... 33:
+            case 35 ... 38:
+            case 41 ... 47:
+            case '0' ... '9':
+            case 58 ... 64:
+            case 'A' ... 'Z':
+            case 91 ... 96:
+            case 'a' ... 'z':
+            case 124 ... 126:
             {
                 if (!(event->state & GDK_CONTROL_MASK))
                 {
@@ -295,9 +366,45 @@ text_view_key_press_callback(GtkWidget* text_view, GdkEventKey* event, gpointer 
                     GtkTextBuffer* text_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
                     gtk_text_buffer_insert_at_cursor(text_buffer, buffer_insert_text, 1);
                 }
+
+                app->editor_typing_setting.left_bracket = 0;
+
                 break;
             }
+
+            case '(': case '{': case '\"': case '\'':
+            {
+                if (event->keyval == '(')
+                {
+                    buffer_insert_text_2[0] = '(';
+                    buffer_insert_text_2[1] = ')';
+                }
+                else if (event->keyval == '{')
+                {
+                    app->editor_typing_setting.left_bracket = 1;
+                    buffer_insert_text_2[0] = '{';
+                    buffer_insert_text_2[1] = '}';
+                }
+                else if (event->keyval == '\"' || 
+                         event->keyval == '\'')
+                {
+                    buffer_insert_text_2[0] = event->keyval;
+                    buffer_insert_text_2[1] = event->keyval;
+                }
+                
+                GtkTextView* textview = notebook_get_current_textview(app->notebook);
+                GtkTextBuffer* text_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
+                gtk_text_buffer_insert_at_cursor(text_buffer, buffer_insert_text_2, 2);
+
+                GtkTextIter* iter = textview_get_cursor_iter(textview);
+                gtk_text_iter_backward_char(iter);
+                gtk_text_buffer_place_cursor(text_buffer, iter);
+
+                break;
+            }
+
         }
+
         switch (event->keyval)
         {
             case GDK_KEY_s:
@@ -305,7 +412,7 @@ text_view_key_press_callback(GtkWidget* text_view, GdkEventKey* event, gpointer 
             {
                 if (event->state & GDK_CONTROL_MASK)
                 {
-                    g_print("Ctrl + S\n");
+                    log("Ctrl + S\n");
                     int page_number = 
                         gtk_notebook_get_current_page(GTK_NOTEBOOK(app->notebook));
                     
@@ -333,20 +440,35 @@ text_view_key_press_callback(GtkWidget* text_view, GdkEventKey* event, gpointer 
                 break;
             }
 
+            case GDK_KEY_h:
+            case GDK_KEY_H:
+            {
+                if (event->state & GDK_CONTROL_MASK)
+                {
+                    syntax_highlight();
+                }
+                break;
+            }
+
             case GDK_KEY_Return:
             {
                 textview = notebook_get_current_textview(app->notebook);
                 textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
-                gtk_text_buffer_insert_at_cursor(textbuffer, "\n", 1);
-                break;
-            }
+                
+                if (!app->editor_typing_setting.left_bracket)
+                {
+                    gtk_text_buffer_insert_at_cursor(textbuffer, "\n", 1);
+                }
+                else
+                {
+                    gtk_text_buffer_insert_at_cursor(textbuffer, EnterOffset, 6);
+                    GtkTextIter* iter = textview_get_cursor_iter(textview);
+                    gtk_text_iter_backward_line(iter);
+                    gtk_text_iter_forward_chars(iter, 4);
+                    gtk_text_buffer_place_cursor(textbuffer, iter);
 
-            //case GDK_KEY_KP_Space:
-            case GDK_KEY_space:
-            {
-                GtkTextView* textview = notebook_get_current_textview(app->notebook);
-                GtkTextBuffer* text_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
-                gtk_text_buffer_insert_at_cursor(text_buffer, " ", 1);
+                    app->editor_typing_setting.left_bracket = 0;
+                }
                 break;
             }
 
@@ -387,7 +509,6 @@ text_view_key_press_callback(GtkWidget* text_view, GdkEventKey* event, gpointer 
 
             case GDK_KEY_Up:
             {
-                g_print("up arrow\n");
                 textview = notebook_get_current_textview(app->notebook);
                 textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
                 
@@ -400,7 +521,6 @@ text_view_key_press_callback(GtkWidget* text_view, GdkEventKey* event, gpointer 
 
             case GDK_KEY_Down:
             {
-                g_print("down arrow\n");
                 GtkTextView* textview = notebook_get_current_textview(app->notebook);
                 GtkTextBuffer* textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
                 GtkTextIter* iter = textview_get_cursor_iter(textview);
@@ -489,11 +609,11 @@ text_view_mouse_press_callback(GtkWidget* widget, GdkEventButton* event, gpointe
     {
         if (event->button == SIMPLE_MOUSE_RIGHT_BUTTON)
         {
-            g_print("right btn clicked!\n");
+            log("right btn clicked!\n");
         }
         else if (event->button == SIMPLE_MOUSE_LEFT_BUTTON)
         {
-            g_print("left btn clicked!\n");
+            log("left btn clicked!\n");
             GtkTextView* textview = notebook_get_current_textview(app->notebook);
             statusbar_set_info(app->statusbar, 
                 textview, 
@@ -506,7 +626,7 @@ text_view_mouse_press_callback(GtkWidget* widget, GdkEventButton* event, gpointe
 static void
 menu_item_new_callback()
 {
-    g_print("New clicked!\n");
+    debug("New clicked!\n");
     simple_notebook_add_page(app, "Untitled");
     int pages_number = gtk_notebook_get_n_pages(GTK_NOTEBOOK(app->notebook))-1;
     gtk_notebook_set_current_page(GTK_NOTEBOOK(app->notebook), pages_number);
@@ -516,7 +636,7 @@ menu_item_new_callback()
 static void 
 menu_item_open_callback()
 {
-    g_print("Open clicked!\n");
+    debug("Open clicked!\n");
 
     GtkFileFilter* file_chooser_filter;
     GtkWidget* open_file_chooser;
@@ -543,16 +663,16 @@ menu_item_open_callback()
         //    //TODO: remove this in future
         //    filepath = "/home/bies/Documents/programming/c/gtkTextEditor/default.c";    
         //}
-        g_print("filepath: %s\n", filepath);
+        debug("filepath: %s\n", filepath);
             
         char* filename = file_get_name(filepath);
         simple_notebook_add_page(app, filename);
 
-        char* editor_text = file_read(filepath);
-        g_print("file content: %s\n", editor_text);
+        const char* editor_text = file_read(filepath);
+        debug("file content: %s\n", editor_text);
 
         int pages_number = gtk_notebook_get_n_pages(GTK_NOTEBOOK(app->notebook))-1;
-        g_print("gtk_notebook_get_n_pages: %d\n", pages_number);
+        debug("gtk_notebook_get_n_pages: %d\n", pages_number);
         
         GtkWidget* page = gtk_notebook_get_nth_page(
             GTK_NOTEBOOK(app->notebook), pages_number);
@@ -565,10 +685,12 @@ menu_item_open_callback()
             GtkTextBuffer* textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
             gtk_text_buffer_set_text(textbuffer, editor_text, -1);  
             statusbar_set_info(app->statusbar, GTK_TEXT_VIEW(textview), textbuffer); 
+
+            syntax_highlight();
         }
         else 
         {
-            g_print("textview == NULL\n");
+            debug("textview == NULL\n");
         }
 
     }
@@ -580,12 +702,10 @@ menu_item_open_callback()
 static void
 menu_item_save_callback()
 {
-    g_print("call: btn_file_save_clicked\n");
+    debug("call: btn_file_save_clicked\n");
     char* filename; 
-    char* text;
+    const char* text;
     GtkTextBuffer* textbuffer; 
-    GtkTextIter start;
-    GtkTextIter end;
     int32 page_number = gtk_notebook_get_current_page(GTK_NOTEBOOK(app->notebook));
     if (page_number != -1)
     {
@@ -597,14 +717,10 @@ menu_item_save_callback()
         if (textview)
         {
             textbuffer = gtk_text_view_get_buffer(textview);
-            gtk_text_buffer_get_bounds(GTK_TEXT_BUFFER(textbuffer), &start, &end);
-            if (textbuffer)
-            {
-                text = gtk_text_buffer_get_text(textbuffer, &start, &end, FALSE);
-                g_print("text: %s\n", text);
-                file_write(file_info->filepath, text);
-                file_info_set_saved(page_number);
-            }
+            text = text_buffer_get_text(textbuffer);
+            debug("text: %s\n", text);
+            file_write(file_info->filepath, text);
+            file_info_set_saved(page_number);
         }
     }
 }
@@ -612,7 +728,7 @@ menu_item_save_callback()
 static void
 menu_item_save_as_callback()
 {
-    g_print("Save as clicked!\n");
+    debug("Save as clicked!\n");
     char* text;
     int result; 
     //dialog need to be set every time
@@ -647,7 +763,7 @@ menu_item_save_as_callback()
         gtk_text_buffer_get_bounds(buffer, &start, &end);
         text = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
     
-        g_print("text: %s\n", text);
+        debug("text: %s\n", text);
         file_write(filepath, text);
         page_number = 
             gtk_notebook_get_current_page(GTK_NOTEBOOK(app->notebook));
@@ -742,7 +858,7 @@ static void
 notebook_callback(GtkNotebook* notebook, GtkWidget*page, guint page_num, gpointer data)
 {
     int page_number = gtk_notebook_page_num(notebook, page);
-    g_print("page num: %d\n", page_number);
+    debug("page num: %d\n", page_number);
 }
 
 static void 
@@ -809,6 +925,19 @@ notebook_get_current_textview(GtkWidget* notebook)
     return textview;        
 }
 
+static const char*
+text_buffer_get_text( GtkTextBuffer* textbuffer)
+{
+    GtkTextIter start;
+    GtkTextIter end;
+    gtk_text_buffer_get_bounds(GTK_TEXT_BUFFER(textbuffer), &start, &end);
+    if (textbuffer)
+    {
+        return gtk_text_buffer_get_text(textbuffer, &start, &end, FALSE);
+    }
+    return NULL;
+}
+
 static GtkTextIter* 
 textview_get_cursor_iter(GtkTextView* textview)
 {
@@ -829,7 +958,7 @@ statusbar_set_info(GtkWidget* statusbar, GtkTextView* textview, GtkTextBuffer* t
     int row, col;
     GtkTextIter iter;
     GtkTextMark* mark;
-
+    
     mark = gtk_text_buffer_get_insert(textbuffer);
     gtk_text_buffer_get_iter_at_mark(textbuffer, &iter, mark);
     row = gtk_text_iter_get_line(&iter) + 1;
@@ -840,11 +969,135 @@ statusbar_set_info(GtkWidget* statusbar, GtkTextView* textview, GtkTextBuffer* t
     gtk_statusbar_push(GTK_STATUSBAR(statusbar), context_id, status_string);
 }
 
+static void 
+syntax_highlight()
+{
+    GtkTextBuffer* buffer = 
+        gtk_text_view_get_buffer(GTK_TEXT_VIEW(
+            notebook_get_current_textview(app->notebook)));
+
+    key_words_types_tag = gtk_text_buffer_create_tag(buffer, "class_color", 
+        "foreground", "green", NULL);
+    
+    int32 i, j, flag, buffer_text_length, 
+        line = 1, col = 1;
+    
+    const char* buffer_text = text_buffer_get_text(buffer);
+    buffer_text_length = vstring_length(buffer_text);
+    for (i = 0; i < buffer_text_length; i++)
+    {
+        flag = 0;
+        char el = buffer_text[i];
+        switch (el)
+        {
+            case '\n':
+            {
+                ++line;
+                col = 1;
+                break;
+            }
+            default:
+            {
+                int32 flag, key_word_length = 0;
+                for (int32 key = 0; key < 9; key++)
+                {
+                    const char* key_word_current = key_words_types[key];
+                    key_word_length = vstring_length(key_word_current);
+                    flag = 1;
+                    for (int32 c = 0; c < key_word_length; c++)
+                    {
+                        if (key_word_current[c] != buffer_text[c + i])
+                        {
+                            flag = 0;
+                            break;
+                        }
+                    }
+                    if (flag > 0)
+                    {
+                        break;
+                    }
+                }
+                
+                char prevCharacter = buffer_text[i - 1]; 
+                char nextCharacter = buffer_text[i + key_word_length];
+
+                if ((i - 1 >= 0) && 
+                    (flag > 0) &&
+                    ((prevCharacter == ' ') || (prevCharacter == '\n') || (prevCharacter == '*'))  &&
+                    ((nextCharacter == ' ') || (nextCharacter == '\n') || (nextCharacter == '*')))
+                {
+                    debug(GREEN("find keyword\n"));
+
+                    GtkTextIter biter, eiter;
+                    gtk_text_buffer_get_iter_at_line_offset(buffer, &biter, line-1, col-1);
+                    gtk_text_buffer_get_iter_at_line_offset(buffer, &eiter, line-1, (col+key_word_length-1));
+
+                    gtk_text_buffer_apply_tag(buffer, key_words_types_tag, &biter, &eiter);
+
+                    //i += kl - 1
+                    //i++
+                    i += (key_word_length - 1);
+                }
+
+#if 0
+                if (el == key_word[0])
+                {
+                    flag = i; 
+                    for (j = 1; j < key_word_length; j++)
+                    {
+                        el = buffer_text[i + j];
+                        if (el != key_word[j])
+                        {
+                            flag = 0;
+                        }
+                    }
+
+                    char prevCharacter = buffer_text[i - 1]; 
+                    char nextCharacter = buffer_text[i + key_word_length];
+
+                    if ((i - 1 >= 0) && 
+                        (flag > 0) &&
+                        ((prevCharacter == ' ') || (prevCharacter == '\n')) &&
+                        ((nextCharacter == ' ') || (nextCharacter == '\n')))
+                    {
+                        debug(GREEN("find class keyword\n"));
+
+                        GtkTextIter biter, eiter;
+                        gtk_text_buffer_get_iter_at_line_offset(buffer, &biter, line-1, col-1);
+                        gtk_text_buffer_get_iter_at_line_offset(buffer, &eiter, line-1, (col + key_word_length - 1));
+
+                        gtk_text_buffer_apply_tag(buffer, text_tag, &biter, &eiter);
+
+#if 0
+                        debug("i: %d, line: %d, col: %d, col+key_word_length: %d\n", line, i, col, (col + key_word_length));
+                        debug("flag: %d\n", flag);
+                        debug("buffer_text[i-1]: %c\n", prevCharacter);
+                        debug("buffer_text[i]: %c\n", buffer_text[i]);
+                        debug("buffer_text[i+key_word_length]: %c\n", nextCharacter);
+#endif
+
+                        i += key_word_length;
+                    }
+                }
+#endif
+
+                ++col;
+
+                break;
+            }
+        }
+
+        
+
+    }
+
+}
+
 int main(int argc, char** argv)
 {
     #if 1
     
-    g_print("It works\n");
+    debug("It works\n");
     gtk_init(&argc, &argv);
     
     app = simple_new();
