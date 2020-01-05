@@ -23,13 +23,17 @@
 // * [create] enter + {} logic
 // * [mod] deleting pair character ( '', "", (), {} )
 // * [create] logic for "in_brackets" 
-// * [fix] {}
+// * [fix] смотреть на пред alignment for {}
 // * [fix] ctrl+o & ctrl+s & save_as logic
 
-// уровень вложенности для { }
+// * [optimization]
+// *    [optimize] syntax_highlight
 
 //opt
 // * [free] get_iter
+
+/*
+*/
 
 /*
 NOTE:
@@ -125,6 +129,7 @@ static void window_destroy(GtkWindow* window, gpointer user_data);
 static GtkTextIter* textview_get_cursor_iter(GtkTextView* textview);
 static const char* text_buffer_get_text(GtkTextBuffer* textbuffer);
 static void statusbar_set_info(GtkWidget* statusbar, GtkTextView* textview, GtkTextBuffer* textbuffer);
+static void syntax_highlight_init(GtkTextBuffer* buffer);
 static void syntax_highlight();
 
 simple* app;
@@ -135,27 +140,39 @@ const char* g_main_directory_path = "/home/bies/Documents/programming/c/gtkTextE
 #define TabSpace8 TabSpace4 TabSpace4
 #define EnterOffset "\n"TabSpace4"\n"
 
+#define array_length(x) sizeof(x) / sizeof(x[0]) 
+
+#define SH_KEY_WORDS_BASIC 0
+#define SH_KEY_WORDS_TYPES 1
+#define SH_KEY_WORDS_CYCLES 2
+
+
 const char* constant_for_editor = TabSpace4;
 char buffer_insert_text[1];
 char buffer_insert_text_2[2];
 
-const char* key_word = "class";
-
-const char* key_words_struct[] = {
-    "class", "struct"
+const char* g_key_words_basic[] = {
+    "sizeof", "typedef"
 };
+int32 g_key_words_basic_length = array_length(g_key_words_basic);
+GtkTextTag* g_key_words_basic_tag;
 
-const char* key_words_types[] = {
-    "const", "void",
+const char* g_key_words_types[] = {
+    "struct",
+    "static", "const", 
+    "void",
     "char",
     "int", "int8", "int16", "int32", "int64",
     "float", "double"
 };
-GtkTextTag* key_words_types_tag;
+int32 g_key_words_types_length = array_length(g_key_words_types);
+GtkTextTag* g_key_words_types_tag;
 
-const char* key_words_cycle[] = {
+const char* g_key_words_cycles[] = {
     "for", "while", "do"
 };
+int32 g_key_words_cycles_length = array_length(g_key_words_cycles);
+GtkTextTag* g_key_words_cycles_tag;
 
 static void
 window_destroy(GtkWindow* window, gpointer user_data)
@@ -969,18 +986,45 @@ statusbar_set_info(GtkWidget* statusbar, GtkTextView* textview, GtkTextBuffer* t
     gtk_statusbar_push(GTK_STATUSBAR(statusbar), context_id, status_string);
 }
 
+static void
+syntax_highlight_init(GtkTextBuffer* buffer)
+{
+    GdkRGBA color_types = (GdkRGBA) { .5, .3, .5, 1.0 };
+    debug("r: %f, g: %f, b: %f, a: %f\n", color_types.red, 
+        color_types.green, color_types.blue, color_types.alpha);
+    g_key_words_types_tag = gtk_text_tag_new("g_key_words_types_tag");
+    g_object_set(g_key_words_types_tag, "foreground-rgba", &color_types, NULL);
+
+    GdkRGBA color_cycles = (GdkRGBA) { .2, .2, .7, 1.0 };
+    debug("r: %f, g: %f, b: %f, a: %f\n", color_cycles.red, 
+        color_cycles.green, color_cycles.blue, color_cycles.alpha);
+    g_key_words_cycles_tag = gtk_text_tag_new("g_key_words_cycles_tag");
+    g_object_set(g_key_words_cycles_tag, "foreground-rgba", &color_cycles, NULL);
+
+    GdkRGBA color_basic = (GdkRGBA) { .9, .1, .1, 1.0 };
+    debug("r: %f, g: %f, b: %f, a: %f\n", color_basic.red, 
+        color_basic.green, color_basic.blue, color_basic.alpha);
+    g_key_words_basic_tag = gtk_text_tag_new("g_key_words_basic_tag");
+    g_object_set(g_key_words_basic_tag, "foreground-rgba", &color_basic, NULL);
+
+    GtkTextTagTable* tag_table = gtk_text_buffer_get_tag_table(buffer);
+    gtk_text_tag_table_add(tag_table, g_key_words_types_tag);
+    gtk_text_tag_table_add(tag_table, g_key_words_cycles_tag);
+    gtk_text_tag_table_add(tag_table, g_key_words_basic_tag);
+
+}
+
 static void 
 syntax_highlight()
 {
     GtkTextBuffer* buffer = 
         gtk_text_view_get_buffer(GTK_TEXT_VIEW(
             notebook_get_current_textview(app->notebook)));
-
-    key_words_types_tag = gtk_text_buffer_create_tag(buffer, "class_color", 
-        "foreground", "green", NULL);
     
+    syntax_highlight_init(buffer);
+
     int32 i, j, flag, buffer_text_length, 
-        line = 1, col = 1;
+        line = 1, col = 1, sh_mode = -1;
     
     const char* buffer_text = text_buffer_get_text(buffer);
     buffer_text_length = vstring_length(buffer_text);
@@ -988,109 +1032,139 @@ syntax_highlight()
     {
         flag = 0;
         char el = buffer_text[i];
-        switch (el)
+
+        if (el == '\n')
         {
-            case '\n':
+            ++line;
+            col = 1;
+        }
+        else
+        {
+            int32 key, flag=-1, key_word_length = 0;
+            for (key = 0; key < g_key_words_types_length; key++)
             {
-                ++line;
-                col = 1;
-                break;
-            }
-            default:
-            {
-                int32 flag, key_word_length = 0;
-                for (int32 key = 0; key < 9; key++)
+                const char* key_word_current = g_key_words_types[key];
+                key_word_length = vstring_length(key_word_current);
+                if ((buffer_text[key_word_length + i] == ' ')  || 
+                    (buffer_text[key_word_length + i] == '\n') || 
+                    (buffer_text[key_word_length + i] == '*'))
                 {
-                    const char* key_word_current = key_words_types[key];
-                    key_word_length = vstring_length(key_word_current);
-                    flag = 1;
+                    flag = key;
                     for (int32 c = 0; c < key_word_length; c++)
                     {
                         if (key_word_current[c] != buffer_text[c + i])
                         {
-                            flag = 0;
+                            flag = -1;
                             break;
                         }
                     }
-                    if (flag > 0)
+                        
+                    //im not sure about this
+                    if (flag >= 0)
                     {
+                        sh_mode = SH_KEY_WORDS_TYPES;
                         break;
                     }
                 }
-                
-                char prevCharacter = buffer_text[i - 1]; 
-                char nextCharacter = buffer_text[i + key_word_length];
+            }
 
-                if ((i - 1 >= 0) && 
-                    (flag > 0) &&
-                    ((prevCharacter == ' ') || (prevCharacter == '\n') || (prevCharacter == '*'))  &&
-                    ((nextCharacter == ' ') || (nextCharacter == '\n') || (nextCharacter == '*')))
+            if (flag < 0)
+            {
+                for (key = 0; key < g_key_words_cycles_length; key++)
                 {
-                    debug(GREEN("find keyword\n"));
-
-                    GtkTextIter biter, eiter;
-                    gtk_text_buffer_get_iter_at_line_offset(buffer, &biter, line-1, col-1);
-                    gtk_text_buffer_get_iter_at_line_offset(buffer, &eiter, line-1, (col+key_word_length-1));
-
-                    gtk_text_buffer_apply_tag(buffer, key_words_types_tag, &biter, &eiter);
-
-                    //i += kl - 1
-                    //i++
-                    i += (key_word_length - 1);
-                }
-
-#if 0
-                if (el == key_word[0])
-                {
-                    flag = i; 
-                    for (j = 1; j < key_word_length; j++)
+                    const char* key_word_current = g_key_words_cycles[key];
+                    key_word_length = vstring_length(key_word_current);
+                    if ((buffer_text[key_word_length + i] == ' ')  || 
+                        (buffer_text[key_word_length + i] == '\n') || 
+                        (buffer_text[key_word_length + i] == '*'))
                     {
-                        el = buffer_text[i + j];
-                        if (el != key_word[j])
+                        flag = key;
+                        for (int32 c = 0; c < key_word_length; c++)
                         {
-                            flag = 0;
+                            if (key_word_current[c] != buffer_text[c + i])
+                            {
+                                flag = -1;
+                                break;
+                            }
+                        }
+                            
+                        if (flag >= 0)
+                        {
+                            sh_mode = SH_KEY_WORDS_CYCLES;
+                            break;
                         }
                     }
-
-                    char prevCharacter = buffer_text[i - 1]; 
-                    char nextCharacter = buffer_text[i + key_word_length];
-
-                    if ((i - 1 >= 0) && 
-                        (flag > 0) &&
-                        ((prevCharacter == ' ') || (prevCharacter == '\n')) &&
-                        ((nextCharacter == ' ') || (nextCharacter == '\n')))
-                    {
-                        debug(GREEN("find class keyword\n"));
-
-                        GtkTextIter biter, eiter;
-                        gtk_text_buffer_get_iter_at_line_offset(buffer, &biter, line-1, col-1);
-                        gtk_text_buffer_get_iter_at_line_offset(buffer, &eiter, line-1, (col + key_word_length - 1));
-
-                        gtk_text_buffer_apply_tag(buffer, text_tag, &biter, &eiter);
-
-#if 0
-                        debug("i: %d, line: %d, col: %d, col+key_word_length: %d\n", line, i, col, (col + key_word_length));
-                        debug("flag: %d\n", flag);
-                        debug("buffer_text[i-1]: %c\n", prevCharacter);
-                        debug("buffer_text[i]: %c\n", buffer_text[i]);
-                        debug("buffer_text[i+key_word_length]: %c\n", nextCharacter);
-#endif
-
-                        i += key_word_length;
-                    }
-                }
-#endif
-
-                ++col;
-
-                break;
+                }    
             }
+
+            if (flag < 0)
+            {
+                for (key = 0; key < g_key_words_basic_length; key++)
+                {
+                    const char* key_word_current = g_key_words_basic[key];
+                    key_word_length = vstring_length(key_word_current);
+                    if ((buffer_text[key_word_length + i] == ' ')  ||
+                        (buffer_text[key_word_length + i] == '('))
+                    {
+                        flag = key;
+                        for (int32 c = 0; c < key_word_length; c++)
+                        {
+                            if (key_word_current[c] != buffer_text[c + i])
+                            {
+                                flag = -1;
+                                break;
+                            }
+                        }
+                            
+                        if (flag >= 0)
+                        {
+                            sh_mode = SH_KEY_WORDS_BASIC;
+                            break;
+                        }
+                    }
+                }    
+            }
+
+            char prevCharacter = buffer_text[i - 1]; 
+            char nextCharacter = buffer_text[i + key_word_length];
+
+            if ((flag >= 0) &&
+               (((i == 0) && ((nextCharacter == ' ') || (nextCharacter == '\n') || (nextCharacter == '*'))) ||
+               (((i + key_word_length) == buffer_text_length) && ((prevCharacter == ' ') || (prevCharacter == '\n') || (prevCharacter == '*'))) ||
+                ((i > 0 && (i + key_word_length) < (buffer_text_length)) && ((prevCharacter == ' ') || (prevCharacter == '\n') || (prevCharacter == '*')) && ((nextCharacter == ' ') || (nextCharacter == '\n') || (nextCharacter == '*')))))
+            {
+                //main
+                debug(GREEN("find keyword\n"));
+
+                GtkTextIter biter, eiter;
+                gtk_text_buffer_get_iter_at_line_offset(buffer, &biter, line-1, col-1);
+                gtk_text_buffer_get_iter_at_line_offset(buffer, &eiter, line-1, (col+key_word_length-1));
+
+                //"g_key_words_types_tag"
+                //gtk_text_buffer_apply_tag g_key_words_types_tag
+                if (sh_mode == SH_KEY_WORDS_TYPES)
+                {
+                    gtk_text_buffer_apply_tag_by_name(buffer, "g_key_words_types_tag", &biter, &eiter);
+                }
+                else if (sh_mode == SH_KEY_WORDS_CYCLES)
+                {
+                    gtk_text_buffer_apply_tag_by_name(buffer, "g_key_words_cycles_tag", &biter, &eiter);
+                }
+                else if (sh_mode == SH_KEY_WORDS_BASIC)
+                {
+                    debug("BASIC\n");
+                    gtk_text_buffer_apply_tag_by_name(buffer, "g_key_words_basic_tag", &biter, &eiter);
+                }
+
+                //i += kl - 1
+                //i++
+                //i += (key_word_length - 1);
+            }
+                    
+            ++col;
         }
 
-        
-
     }
-
 }
 
 int main(int argc, char** argv)
