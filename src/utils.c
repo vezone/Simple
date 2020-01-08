@@ -169,11 +169,12 @@ char* vstring_copy(const char* to_copy)
 {
     int32 i;
     int32 to_copy_length = vstring_length(to_copy);
-    char* copy = malloc(to_copy_length * sizeof(char));
+    char* copy = malloc((to_copy_length + 1) * sizeof(char));
     for (i = 0; i < to_copy_length; i++)
     {
         copy[i] = to_copy[i];
     }
+    copy[to_copy_length] = '\0';
     return copy;
 }
 

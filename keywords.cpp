@@ -15,6 +15,8 @@ double* ptrd;
 static char* s_string = "STRING";
 int32 some = sizeof(char);
 typedef int i;    
+typedef
+sizeof
 
 class ClassName
 {

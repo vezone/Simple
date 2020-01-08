@@ -123,14 +123,14 @@ static void menu_item_editor_callback(simple *app);
 static void notebook_callback(GtkNotebook* notebook, GtkWidget*page, guint page_num, gpointer data);
 static void notebook_tab_close_button_callback(GtkWidget* button, gpointer data);
 static GtkWidget* notebook_page_get_textview(GtkWidget* page);
-static GtkTextView* notebook_get_current_textview(GtkWidget* notebook);
+static GtkWidget* notebook_get_current_textview(GtkWidget* notebook);
 //additional
 static void window_destroy(GtkWindow* window, gpointer user_data);
 static GtkTextIter* textview_get_cursor_iter(GtkTextView* textview);
 static const char* text_buffer_get_text(GtkTextBuffer* textbuffer);
 static void statusbar_set_info(GtkWidget* statusbar, GtkTextView* textview, GtkTextBuffer* textbuffer);
-static void syntax_highlight_init(GtkTextBuffer* buffer);
-static void syntax_highlight();
+static void syntax_highlight_init(GtkTextBuffer* textbuffer);
+static void syntax_highlight(GtkTextBuffer* textbuffer);
 
 simple* app;
 
@@ -195,7 +195,7 @@ simple_new()
     
     app->menu_bar = simple_menu_bar_new();
     app->notebook = simple_notebook_new();
-
+    
     app->statusbar = gtk_statusbar_new();
     guint context_id = gtk_statusbar_get_context_id(GTK_STATUSBAR(app->statusbar), "status");
     const char* status_string = g_strdup_printf("line %d, column %d", 0, 0);
@@ -358,8 +358,9 @@ static gboolean
 text_view_key_press_callback(GtkWidget* text_view, GdkEventKey* event, gpointer data)
 {
     //GTK_WIDGET_CLASS(text_view)->button_press_event(text_view, event);
-    GtkTextView* textview = NULL;
-    GtkTextBuffer* textbuffer = NULL;
+    GtkTextView* textview = GTK_TEXT_VIEW(
+        notebook_get_current_textview(app->notebook));
+    GtkTextBuffer* textbuffer = gtk_text_view_get_buffer(textview);
 
     if (event->type == GDK_KEY_PRESS)
     {
@@ -379,10 +380,11 @@ text_view_key_press_callback(GtkWidget* text_view, GdkEventKey* event, gpointer 
                 if (!(event->state & GDK_CONTROL_MASK))
                 {
                     buffer_insert_text[0] = event->keyval;
-                    GtkTextView* textview = notebook_get_current_textview(app->notebook);
-                    GtkTextBuffer* text_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
-                    gtk_text_buffer_insert_at_cursor(text_buffer, buffer_insert_text, 1);
+                    gtk_text_buffer_insert_at_cursor(
+                        textbuffer, buffer_insert_text, 1);
                 }
+
+                syntax_highlight(textbuffer);
 
                 app->editor_typing_setting.left_bracket = 0;
 
@@ -409,13 +411,11 @@ text_view_key_press_callback(GtkWidget* text_view, GdkEventKey* event, gpointer 
                     buffer_insert_text_2[1] = event->keyval;
                 }
                 
-                GtkTextView* textview = notebook_get_current_textview(app->notebook);
-                GtkTextBuffer* text_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
-                gtk_text_buffer_insert_at_cursor(text_buffer, buffer_insert_text_2, 2);
+                gtk_text_buffer_insert_at_cursor(textbuffer, buffer_insert_text_2, 2);
 
                 GtkTextIter* iter = textview_get_cursor_iter(textview);
                 gtk_text_iter_backward_char(iter);
-                gtk_text_buffer_place_cursor(text_buffer, iter);
+                gtk_text_buffer_place_cursor(textbuffer, iter);
 
                 break;
             }
@@ -462,16 +462,13 @@ text_view_key_press_callback(GtkWidget* text_view, GdkEventKey* event, gpointer 
             {
                 if (event->state & GDK_CONTROL_MASK)
                 {
-                    syntax_highlight();
+                    syntax_highlight(textbuffer);
                 }
                 break;
             }
 
             case GDK_KEY_Return:
             {
-                textview = notebook_get_current_textview(app->notebook);
-                textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
-                
                 if (!app->editor_typing_setting.left_bracket)
                 {
                     gtk_text_buffer_insert_at_cursor(textbuffer, "\n", 1);
@@ -492,22 +489,15 @@ text_view_key_press_callback(GtkWidget* text_view, GdkEventKey* event, gpointer 
             case GDK_KEY_BackSpace:
             {
                 //delete single character
-                GtkTextView* textview = notebook_get_current_textview(app->notebook);
-                GtkTextBuffer* textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
-                
                 GtkTextIter* iter = textview_get_cursor_iter(textview);
                 gtk_text_buffer_backspace(textbuffer, iter, FALSE, TRUE);
-
                 break;
             }
 
             case GDK_KEY_Delete:
             {
                 //delete single character
-                GtkTextView* textview = notebook_get_current_textview(app->notebook);
-                GtkTextBuffer* textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
-                
-                GtkTextIter* iter = textview_get_cursor_iter(textview);
+                GtkTextIter* iter = textview_get_cursor_iter(GTK_TEXT_VIEW(textview));
                 GtkTextIter* end = gtk_text_iter_copy(iter);
                 gtk_text_iter_forward_cursor_positions(end, 1);
                 gtk_text_buffer_delete(textbuffer, iter, end);
@@ -518,41 +508,29 @@ text_view_key_press_callback(GtkWidget* text_view, GdkEventKey* event, gpointer 
 
             case GDK_KEY_Tab:
             {
-                textview = notebook_get_current_textview(app->notebook);
-                textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
                 gtk_text_buffer_insert_at_cursor(textbuffer, constant_for_editor, 4);
                 break;
             }
 
             case GDK_KEY_Up:
             {
-                textview = notebook_get_current_textview(app->notebook);
-                textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
-                
                 GtkTextIter* iter = textview_get_cursor_iter(textview);
                 gtk_text_iter_backward_line(iter);
                 gtk_text_buffer_place_cursor(textbuffer, iter);
-
                 break;
             }
 
             case GDK_KEY_Down:
             {
-                GtkTextView* textview = notebook_get_current_textview(app->notebook);
-                GtkTextBuffer* textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
                 GtkTextIter* iter = textview_get_cursor_iter(textview);
                 gtk_text_iter_forward_line(iter);
                 gtk_text_buffer_place_cursor(textbuffer, iter);
-                
                 break;
             }
 
             case GDK_KEY_Left:
             {
-                textview = notebook_get_current_textview(app->notebook);
-                textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
                 GtkTextIter* iter = textview_get_cursor_iter(textview);
-
                 if (event->state & GDK_KEY_Shift_L)
                 {
                     gtk_text_iter_backward_word_start(iter);
@@ -568,10 +546,7 @@ text_view_key_press_callback(GtkWidget* text_view, GdkEventKey* event, gpointer 
 
             case GDK_KEY_Right:
             {
-                textview = notebook_get_current_textview(app->notebook);
-                textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
                 GtkTextIter* iter = textview_get_cursor_iter(textview);
-                
                 if (event->state & GDK_KEY_Shift_L)
                 {
                     gtk_text_iter_forward_word_end(iter);
@@ -602,18 +577,7 @@ text_view_key_press_callback(GtkWidget* text_view, GdkEventKey* event, gpointer 
         }
     }
 
-    if (textview == NULL)
-    {
-        textview = notebook_get_current_textview(app->notebook);
-    }
-
-    if (textbuffer == NULL)
-    {
-        textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
-    }
-
-    statusbar_set_info(app->statusbar, 
-        textview, textbuffer);
+    statusbar_set_info(app->statusbar, textview, textbuffer);
 
     return TRUE;
 }
@@ -631,7 +595,8 @@ text_view_mouse_press_callback(GtkWidget* widget, GdkEventButton* event, gpointe
         else if (event->button == SIMPLE_MOUSE_LEFT_BUTTON)
         {
             log("left btn clicked!\n");
-            GtkTextView* textview = notebook_get_current_textview(app->notebook);
+            GtkTextView* textview = GTK_TEXT_VIEW(
+                notebook_get_current_textview(app->notebook));
             statusbar_set_info(app->statusbar, 
                 textview, 
                 gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview)));
@@ -703,7 +668,7 @@ menu_item_open_callback()
             gtk_text_buffer_set_text(textbuffer, editor_text, -1);  
             statusbar_set_info(app->statusbar, GTK_TEXT_VIEW(textview), textbuffer); 
 
-            syntax_highlight();
+            syntax_highlight(textbuffer);
         }
         else 
         {
@@ -729,11 +694,11 @@ menu_item_save_callback()
         file_info* file_info = file_info_get(page_number);
         GtkWidget* page = gtk_notebook_get_nth_page(
                     GTK_NOTEBOOK(app->notebook), page_number);
-        GtkTextView* textview = notebook_get_current_textview(app->notebook);
+        GtkWidget* textview = notebook_get_current_textview(app->notebook);
         
         if (textview)
         {
-            textbuffer = gtk_text_view_get_buffer(textview);
+            textbuffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview));
             text = text_buffer_get_text(textbuffer);
             debug("text: %s\n", text);
             file_write(file_info->filepath, text);
@@ -769,7 +734,7 @@ menu_item_save_as_callback()
 
         chooser = GTK_FILE_CHOOSER(file_chooser_save);
         filepath = gtk_file_chooser_get_filename(chooser);
-        textview = notebook_get_current_textview(app->notebook);
+        textview = GTK_TEXT_VIEW(notebook_get_current_textview(app->notebook));
         buffer = gtk_text_view_get_buffer(textview);
         
         //if (filepath == NULL)
@@ -933,17 +898,17 @@ notebook_page_get_textview(GtkWidget* page)
     return NULL;
 }
 
-static GtkTextView* 
+static GtkWidget* 
 notebook_get_current_textview(GtkWidget* notebook)
 {
     int32 page_number = gtk_notebook_get_current_page(GTK_NOTEBOOK(notebook));
     GtkWidget* page = gtk_notebook_get_nth_page(GTK_NOTEBOOK(notebook), page_number);
-    GtkTextView* textview = GTK_TEXT_VIEW(notebook_page_get_textview(page));
+    GtkWidget* textview = notebook_page_get_textview(page);
     return textview;        
 }
 
 static const char*
-text_buffer_get_text( GtkTextBuffer* textbuffer)
+text_buffer_get_text(GtkTextBuffer* textbuffer)
 {
     GtkTextIter start;
     GtkTextIter end;
@@ -986,9 +951,13 @@ statusbar_set_info(GtkWidget* statusbar, GtkTextView* textview, GtkTextBuffer* t
     gtk_statusbar_push(GTK_STATUSBAR(statusbar), context_id, status_string);
 }
 
+int G_SH_INITIALIZED = 0;
+
 static void
 syntax_highlight_init(GtkTextBuffer* buffer)
 {
+    G_SH_INITIALIZED = 1;
+
     GdkRGBA color_types = (GdkRGBA) { .5, .3, .5, 1.0 };
     debug("r: %f, g: %f, b: %f, a: %f\n", color_types.red, 
         color_types.green, color_types.blue, color_types.alpha);
@@ -1015,18 +984,17 @@ syntax_highlight_init(GtkTextBuffer* buffer)
 }
 
 static void 
-syntax_highlight()
+syntax_highlight(GtkTextBuffer* textbuffer)
 {
-    GtkTextBuffer* buffer = 
-        gtk_text_view_get_buffer(GTK_TEXT_VIEW(
-            notebook_get_current_textview(app->notebook)));
-    
-    syntax_highlight_init(buffer);
+    if (!G_SH_INITIALIZED)
+    {
+        syntax_highlight_init(textbuffer);
+    }
 
     int32 i, j, flag, buffer_text_length, 
         line = 1, col = 1, sh_mode = -1;
     
-    const char* buffer_text = text_buffer_get_text(buffer);
+    const char* buffer_text = text_buffer_get_text(textbuffer);
     buffer_text_length = vstring_length(buffer_text);
     for (i = 0; i < buffer_text_length; i++)
     {
@@ -1103,8 +1071,13 @@ syntax_highlight()
                 {
                     const char* key_word_current = g_key_words_basic[key];
                     key_word_length = vstring_length(key_word_current);
-                    if ((buffer_text[key_word_length + i] == ' ')  ||
-                        (buffer_text[key_word_length + i] == '('))
+                    if (
+                        (buffer_text[key_word_length + i] == '(')
+                    ||
+                        (buffer_text[key_word_length + i] == ' ')
+                    ||
+                        (buffer_text[key_word_length + i] == '\n')  
+                        )
                     {
                         flag = key;
                         for (int32 c = 0; c < key_word_length; c++)
@@ -1137,23 +1110,23 @@ syntax_highlight()
                 debug(GREEN("find keyword\n"));
 
                 GtkTextIter biter, eiter;
-                gtk_text_buffer_get_iter_at_line_offset(buffer, &biter, line-1, col-1);
-                gtk_text_buffer_get_iter_at_line_offset(buffer, &eiter, line-1, (col+key_word_length-1));
+                gtk_text_buffer_get_iter_at_line_offset(textbuffer, &biter, line-1, col-1);
+                gtk_text_buffer_get_iter_at_line_offset(textbuffer, &eiter, line-1, (col+key_word_length-1));
 
                 //"g_key_words_types_tag"
                 //gtk_text_buffer_apply_tag g_key_words_types_tag
                 if (sh_mode == SH_KEY_WORDS_TYPES)
                 {
-                    gtk_text_buffer_apply_tag_by_name(buffer, "g_key_words_types_tag", &biter, &eiter);
+                    gtk_text_buffer_apply_tag_by_name(textbuffer, "g_key_words_types_tag", &biter, &eiter);
                 }
                 else if (sh_mode == SH_KEY_WORDS_CYCLES)
                 {
-                    gtk_text_buffer_apply_tag_by_name(buffer, "g_key_words_cycles_tag", &biter, &eiter);
+                    gtk_text_buffer_apply_tag_by_name(textbuffer, "g_key_words_cycles_tag", &biter, &eiter);
                 }
                 else if (sh_mode == SH_KEY_WORDS_BASIC)
                 {
                     debug("BASIC\n");
-                    gtk_text_buffer_apply_tag_by_name(buffer, "g_key_words_basic_tag", &biter, &eiter);
+                    gtk_text_buffer_apply_tag_by_name(textbuffer, "g_key_words_basic_tag", &biter, &eiter);
                 }
 
                 //i += kl - 1
