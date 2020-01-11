@@ -47,6 +47,7 @@ void file_info_print();
 int32 vstring_length(const char* string);
 int32 vstring_compare(const char* left, const char* right);
 char* vstring_copy(const char* to_copy);
+char* vstring_repeate(const char* to_repeate, int32 count);
 const char* file_read(const char* path);
 void  file_write(const char* path, const char* data);
 char* file_get_name(const char* filepath);

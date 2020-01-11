@@ -178,6 +178,31 @@ char* vstring_copy(const char* to_copy)
     return copy;
 }
 
+char* vstring_repeate(const char* to_repeate, int32 count)
+{
+    if ((count <= 0) || (vstring_compare(to_repeate, "")))
+    {
+        return "";
+    }
+    
+    int32 i;
+    int32 j;
+    int32 id;
+    int32 to_repeate_length = vstring_length(to_repeate);
+    int32 new_length = count * to_repeate_length;
+    char* new_string = malloc((new_length + 1) * sizeof(char));
+    for (i = 0, id = 0; i < count; i++)
+    {
+        for (j = 0; j < to_repeate_length; j++)
+        {
+            new_string[id] = to_repeate[j];
+            ++id;
+        }
+    }
+    new_string[new_length] = '\0';
+    return new_string;
+}
+
 const char* file_read(const char* path)
 {
     long file_length;

@@ -7,6 +7,12 @@
 
 //TODO:
 
+// PRIMARY
+//
+// * [work on] up & down & left & right arrows
+// *    reasign nesting_level every time arrow_keys pressed
+// * [create] control nesting_level
+
 // * [new-module] editor->setting
 // *    [create] flexible tab (tab=4, tab=8)
 // *    [create] color theme (cairo, gdk)
@@ -16,14 +22,11 @@
 
 // * [maybe-create] shortcuts for new, open, save, save_as
 // * [fix-it] status bar not work with mouse very good
-// * [work on] up & down arrows
 // * [create] selection && arrow + shift selection logic
 // * editor page - single
 
-// * [create] enter + {} logic
 // * [mod] deleting pair character ( '', "", (), {} )
 // * [create] logic for "in_brackets" 
-// * [fix] смотреть на пред alignment for {}
 // * [fix] ctrl+o & ctrl+s & save_as logic
 
 // * [optimization]
@@ -87,8 +90,8 @@ typedef struct simple_file
 
 typedef struct editor_typing_settings 
 {
-    int left_bracket;
-    int in_brackets;
+    int is_left_bracket_logic;
+    int nesting_level;
 } editor_typing_settings; 
 
 typedef struct simple 
@@ -146,6 +149,7 @@ const char* g_main_directory_path = "/home/bies/Documents/programming/c/gtkTextE
 #define SH_KEY_WORDS_TYPES 1
 #define SH_KEY_WORDS_CYCLES 2
 
+int G_SH_INITIALIZED = 0;
 
 const char* constant_for_editor = TabSpace4;
 char buffer_insert_text[1];
@@ -213,6 +217,9 @@ simple_new()
 
     gtk_container_add(GTK_CONTAINER(app->window), app->vertical_box);
 
+    app->editor_typing_setting.nesting_level = 0;
+    app->editor_typing_setting.is_left_bracket_logic = 0;
+    
     return app;
 }
 
@@ -230,6 +237,7 @@ simple_window_key_press_callback(GtkWidget* window, GdkEventKey* key, gpointer d
                 {
                     log("Ctrl + O\n");
                     menu_item_open_callback();
+                    G_SH_INITIALIZED = 0;
                 }
                 break;
             }
@@ -241,6 +249,7 @@ simple_window_key_press_callback(GtkWidget* window, GdkEventKey* key, gpointer d
                 {
                     log("Ctrl + N\n");
                     menu_item_new_callback();
+                    G_SH_INITIALIZED = 0;
                 }
                 break;
             }
@@ -386,7 +395,7 @@ text_view_key_press_callback(GtkWidget* text_view, GdkEventKey* event, gpointer 
 
                 syntax_highlight(textbuffer);
 
-                app->editor_typing_setting.left_bracket = 0;
+                app->editor_typing_setting.is_left_bracket_logic = 0;
 
                 break;
             }
@@ -400,9 +409,16 @@ text_view_key_press_callback(GtkWidget* text_view, GdkEventKey* event, gpointer 
                 }
                 else if (event->keyval == '{')
                 {
-                    app->editor_typing_setting.left_bracket = 1;
+                    app->editor_typing_setting.is_left_bracket_logic = 1;
                     buffer_insert_text_2[0] = '{';
                     buffer_insert_text_2[1] = '}';
+
+                    ++app->editor_typing_setting.nesting_level;
+                }
+                else if (event->keyval == '}')
+                {
+                    app->editor_typing_setting.is_left_bracket_logic = 0;
+                    --app->editor_typing_setting.nesting_level;
                 }
                 else if (event->keyval == '\"' || 
                          event->keyval == '\'')
@@ -469,19 +485,86 @@ text_view_key_press_callback(GtkWidget* text_view, GdkEventKey* event, gpointer 
 
             case GDK_KEY_Return:
             {
-                if (!app->editor_typing_setting.left_bracket)
+                if (!app->editor_typing_setting.is_left_bracket_logic)
                 {
                     gtk_text_buffer_insert_at_cursor(textbuffer, "\n", 1);
+                    if (app->editor_typing_setting.nesting_level)
+                    {
+                        char* to_paste = 
+                            vstring_repeate(TabSpace4, app->editor_typing_setting.nesting_level);
+                        gtk_text_buffer_insert_at_cursor(textbuffer, 
+                            to_paste, vstring_length(to_paste));
+                    }
                 }
                 else
                 {
-                    gtk_text_buffer_insert_at_cursor(textbuffer, EnterOffset, 6);
+                    char* to_paste = 
+                        vstring_repeate(TabSpace4, app->editor_typing_setting.nesting_level);
+                    char* to_paste_bracket = 
+                        vstring_repeate(TabSpace4, 
+                            (app->editor_typing_setting.nesting_level - 1));
+                    int32 to_paste_length = vstring_length(to_paste);
+                    int32 to_paste_bracket_length = vstring_length(to_paste_bracket);
+
+                    if (!to_paste) 
+                    {
+                        debug("nesting level: |%d|\n", app->editor_typing_setting.nesting_level);
+                        debug("to_paste: |%s|\n", to_paste);
+                        debug("to_paste_bracket: |%s|\n", to_paste_bracket);
+                        break;
+                    }
+
+
                     GtkTextIter* iter = textview_get_cursor_iter(textview);
-                    gtk_text_iter_backward_line(iter);
-                    gtk_text_iter_forward_chars(iter, 4);
+                    gtk_text_iter_backward_char(iter);
                     gtk_text_buffer_place_cursor(textbuffer, iter);
 
-                    app->editor_typing_setting.left_bracket = 0;
+                    //gtk_text_buffer_insert_at_cursor(textbuffer, "\n", 1);
+                    // if (to_paste_bracket_length)
+                    // {
+                    //     gtk_text_buffer_insert_at_cursor(textbuffer, to_paste_bracket, to_paste_bracket_length);
+                    // }
+                    
+                    // {|
+                    iter = textview_get_cursor_iter(textview);
+                    gtk_text_iter_forward_char(iter);
+                    gtk_text_buffer_place_cursor(textbuffer, iter);
+
+                    // TAB{\n
+                    // |}
+                    // 
+                    gtk_text_buffer_insert_at_cursor(textbuffer, "\n", 1);
+
+                    // TAB{\n
+                    // TABTAB|}
+                    //
+                    gtk_text_buffer_insert_at_cursor(textbuffer, to_paste, to_paste_length);
+                    gtk_text_buffer_insert_at_cursor(textbuffer, "\n", 1);
+                    if (to_paste_bracket_length)
+                    {
+                        gtk_text_buffer_insert_at_cursor(textbuffer, to_paste_bracket, to_paste_bracket_length);
+                    }
+                    //{
+                    //    |
+                    //}
+                    iter = textview_get_cursor_iter(textview);
+                    if (to_paste_bracket_length == 0) 
+                    {
+                        gtk_text_iter_backward_char(iter);
+                    }
+                    else
+                    {
+                        gtk_text_iter_backward_chars(iter, (to_paste_bracket_length + 1));
+                    }
+                    gtk_text_buffer_place_cursor(textbuffer, iter);
+
+                    free(to_paste);
+                    if (to_paste_bracket_length)
+                    {
+                        free(to_paste_bracket);
+                    }
+
+                    app->editor_typing_setting.is_left_bracket_logic = 0;
                 }
                 break;
             }
@@ -951,8 +1034,6 @@ statusbar_set_info(GtkWidget* statusbar, GtkTextView* textview, GtkTextBuffer* t
     gtk_statusbar_push(GTK_STATUSBAR(statusbar), context_id, status_string);
 }
 
-int G_SH_INITIALIZED = 0;
-
 static void
 syntax_highlight_init(GtkTextBuffer* buffer)
 {
@@ -1156,23 +1237,27 @@ int main(int argc, char** argv)
     
     #else
 
-    file_info_add(0, "root/First");
-    file_info_add(1, "root/Second");
-    file_info_add(2, "root/Third");
-    file_info_add(3, "root/Some");
-    file_info_add(4, "root/Any");
-    file_info_add(5, "root/Blabla");
+    // file_info_add(0, "root/First");
+    // file_info_add(1, "root/Second");
+    // file_info_add(2, "root/Third");
+    // file_info_add(3, "root/Some");
+    // file_info_add(4, "root/Any");
+    // file_info_add(5, "root/Blabla");
 
-    file_info_print();
-    file_info_remove(0);
-    file_info_remove(1);
-    file_info_remove(2);
-    file_info_remove(3);
-    file_info_remove(4);
-    file_info_remove(5);
-    file_info_print();
+    // file_info_print();
+    // file_info_remove(0);
+    // file_info_remove(1);
+    // file_info_remove(2);
+    // file_info_remove(3);
+    // file_info_remove(4);
+    // file_info_remove(5);
+    // file_info_print();
 
-    file_info_free();
+    // file_info_free();
+
+    char* result = vstring_repeate("1", 4);
+    printf("result: %s\n", result);
+    free(result);
 
     #endif
 
